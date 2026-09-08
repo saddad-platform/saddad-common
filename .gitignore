@@ -20,6 +20,6 @@ Thumbs.db
 # Logs
 *.log
 
-# Local runtime H2 file-database (dev/test profiles only) - regenerated on every run,
-# never real data, path is relative to whatever cwd the service was launched from.
+# Stray local runtime artifacts (relative paths resolve differently depending on
+# whatever cwd a process was launched from) - never real data, safe to delete anytime.
 data/
