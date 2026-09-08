@@ -1,0 +1,25 @@
+# Maven build output - never commit compiled classes/jars, they are reproducible from source.
+target/
+*.class
+*.jar
+*.war
+!.mvn/wrapper/maven-wrapper.jar
+
+# IDE
+.idea/
+*.iml
+.vscode/
+.settings/
+.classpath
+.project
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+
+# Local runtime H2 file-database (dev/test profiles only) - regenerated on every run,
+# never real data, path is relative to whatever cwd the service was launched from.
+data/
