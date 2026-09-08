@@ -2,7 +2,7 @@ package com.sadad.common.core.util;
 
 /**
  * Utility for masking sensitive data (PII, CR, National ID, IBAN, Email).
- * Adheres to docs/09-OBSERVABILITY-ERROR-HANDLING.md Section 2.
+ * Adheres to saddad-docs/09-OBSERVABILITY-ERROR-HANDLING.md Section 2.
  */
 public final class MaskingUtil {
 
