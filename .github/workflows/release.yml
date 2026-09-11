@@ -15,8 +15,9 @@
 #
 # Put [skip release] in a commit message to publish nothing for that push.
 #
-# The workflow sets the version in the POM, commits it, tags it, creates the GitHub Release,
-# waits for JitPack to build it, and opens a pull request on each service. See RELEASING.md.
+# The workflow sets the version in the POM, commits it, tags it, creates the GitHub Release and
+# waits for JitPack to build it. Updating the services that use the library is done by hand, on
+# whatever schedule each service owner wants. See RELEASING.md.
 name: Release
 
 on:
@@ -35,7 +36,7 @@ on:
         required: false
         type: string
       dry_run:
-        description: 'Work everything out and build it, but create no tag, release or pull requests'
+        description: 'Work everything out and build it, but create no tag and no release'
         required: false
         default: false
         type: boolean
@@ -280,9 +281,9 @@ jobs:
             esac
           done
 
-          echo "::warning::JitPack was still building after ten minutes. The release is fine."
-          echo "::warning::Check https://jitpack.io/#${OWNER}/saddad-common, then run"
-          echo "::warning::'Update consuming services' by hand for ${VERSION}."
+          echo "::warning::JitPack was still building after ten minutes. The release is fine:"
+          echo "::warning::the tag exists and JitPack will finish on its own. Check"
+          echo "::warning::https://jitpack.io/#${OWNER}/saddad-common in a minute."
           echo "published=false" >> "$GITHUB_OUTPUT"
 
       - name: Summary
@@ -317,15 +318,3 @@ jobs:
             echo "</dependency>"
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
-
-  # Separate, so a problem opening pull requests is never mistaken for a problem with the
-  # release, and so it can be re-run on its own.
-  update-consumers:
-    name: Update consuming services
-    needs: release
-    if: ${{ needs.release.outputs.published == 'true' }}
-    uses: ./.github/workflows/update-consumers.yml
-    with:
-      version: ${{ needs.release.outputs.version }}
-      dry_run: false
-    secrets: inherit

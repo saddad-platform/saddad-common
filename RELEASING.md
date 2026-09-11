@@ -7,8 +7,7 @@ clones that git tag, builds it, and serves the result.
 ## You do not release it. Pushing releases it.
 
 Push to `main` and a version publishes itself: the workflow works out the number, puts it in the
-POM, commits it, tags it, creates the GitHub Release, waits for JitPack to build it, and opens a
-pull request on every service that uses the library.
+POM, commits it, tags it, creates the GitHub Release, and waits for JitPack to build it.
 
 The only thing you control is **the number**, and you control it with the commit message you were
 writing anyway:
@@ -41,7 +40,7 @@ automatically.
 
 Actions → **Release** → **Run workflow**, and type the version. Leave the box empty to let the
 commits decide, as a push would. Tick **dry run** to work everything out and build it without
-creating a tag, a release or any pull requests.
+creating a tag or a release.
 
 ### The one rule behind all of this
 
@@ -55,8 +54,7 @@ workflow creates the tags, so this is mostly something you no longer have to rem
 |---|---|
 | The workflow failed before JitPack | The tag was never served. Delete the tag and the release, fix, and release again with the same number. |
 | JitPack failed to build | Read `https://jitpack.io/com/github/saddad-platform/saddad-common/<version>/build.log` - it is the actual build output and says exactly what broke. Fix, then release a new version: JitPack caches a result per version, including a failure. |
-| JitPack was still building when the workflow gave up | Nothing is wrong. Check <https://jitpack.io/#saddad-platform/saddad-common>, then run **Update consuming services** by hand with that version. |
-| The pull requests did not appear | Run **Update consuming services** on its own. It is safe to run repeatedly. |
+| JitPack was still building when the workflow gave up | Nothing is wrong. The tag is published; check <https://jitpack.io/#saddad-platform/saddad-common> a minute later. |
 
 ## Setup
 
@@ -73,24 +71,6 @@ Three things in this repository are the whole configuration:
   locally. Keep all three files committed.
 - **`pom.xml`** carries the version, which must match the tag.
 
-### The one optional thing
-
-The automatic pull requests to the services need a credential, because GitHub does not let a
-workflow in one repository write to another. Without it, releases still work perfectly and you
-bump the version in each service by hand.
-
-**The simple way:**
-
-1. <https://github.com/settings/personal-access-tokens> → **Generate new token** → fine-grained.
-2. Resource owner `saddad-platform`, and select the six service repositories.
-3. Permissions: **Contents: Read and write**, **Pull requests: Read and write**. Nothing else.
-4. Add it as the repository secret `CONSUMER_UPDATE_TOKEN` under
-   **Settings → Secrets and variables → Actions**.
-
-**The better way**, because it is not tied to your personal account: create a GitHub App in the
-organisation with those same two permissions, install it on the service repositories, then add the
-Actions variable `CONSUMER_APP_ID` and the secret `CONSUMER_APP_PRIVATE_KEY`.
-
 ### A licence
 
 Not required by JitPack, and not currently declared. It is still worth adding: without one, anyone
@@ -102,22 +82,23 @@ assumption is "nothing". Add a `LICENSE` file and uncomment the `<licenses>` blo
 | | |
 |---|---|
 | Build and serve the library from a tag | Yes, JitPack, on demand |
-| Open one pull request per consuming service | Yes |
-| Change the library version in a service's POM | Yes, that one line |
-| Change a service's own version | **No** |
-| Change a service's other dependencies or its source | **No** |
-| Merge a consumer pull request | **No** |
+| Touch any other repository | **No** |
 | Release or deploy a service | **No** |
 | Run anything automatically on a push | **No** |
 | Run test cases on GitHub Actions | **No** - `./verify.sh` runs them on your machine |
 
-## Consumer discovery
+## Updating the services
 
-After a release, the automation lists the organisation's repositories, reads each `pom.xml`, and
-treats any repository declaring the `saddad-common` artifact as a consumer. Nothing has to be
-registered for a new service to be included. `.github/consumers.yml` exists for the two cases
-discovery cannot cover: a consumer outside the organisation, and a repository to leave alone.
+By hand, when each service wants it. In that service's `pom.xml`:
 
-A service whose version comes from a parent POM or an imported BOM is reported and skipped rather
-than edited, because introducing a version into a service's dependency management is a change to
-how that service is structured, not a version bump.
+```xml
+<dependency>
+    <groupId>com.github.saddad-platform</groupId>
+    <artifactId>saddad-common</artifactId>
+    <version>1.0.1</version>
+</dependency>
+```
+
+The six services that use the library are saddad-admin, saddad-auth, saddad-employees,
+saddad-onboarding, saddad-violations and saddad-wallet. Each already has the JitPack repository
+declared, so changing the version is the only edit needed.

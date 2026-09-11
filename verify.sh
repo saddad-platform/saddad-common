@@ -7,7 +7,7 @@
 #
 #   1. the library's own tests
 #   2. the three artifacts JitPack will build and serve
-#   3. the tests for the release automation scripts
+#   3. the tests for the version the next release will use
 #
 #   ./verify.sh
 #
@@ -33,7 +33,6 @@ done
 
 echo
 echo "==> 3/3  Release automation tests"
-python3 .github/scripts/test_update_consumers.py 2>&1 | tail -3
 python3 .github/scripts/test_next_version.py 2>&1 | tail -3
 
 echo
