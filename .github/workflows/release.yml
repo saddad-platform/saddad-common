@@ -1,66 +1,73 @@
-# Releases saddad-common through JitPack.
+# Publishes saddad-common. Automatically, on every push to main.
 #
-# There is nothing to upload and no credential to hold. JitPack watches the repository, and the
-# first time anybody asks for a version it clones that tag, builds it and serves the result. So a
-# release here is really three things:
+# Nobody types a version number and nobody creates a tag. The commit messages decide what the
+# next version is:
 #
-#   1. make sure the tag and the POM say the same version, and that the tag builds cleanly
-#      (tests are not run here - ./verify.sh runs them on your machine before you tag);
-#   2. ask JitPack to build it now and wait for the answer, so a broken build is found by the
-#      person who caused it rather than by the next developer who needs the version;
-#   3. open a pull request on every service that uses the library.
+#     an ordinary message, "Fix the wallet balance"     ->  patch   1.0.0 -> 1.0.1
+#     a message starting "feat:"                        ->  minor   1.0.1 -> 1.1.0
+#     a message with "!" after its type, or a           ->  major   1.1.0 -> 2.0.0
+#       "BREAKING CHANGE:" line
 #
-# See RELEASING.md.
+# So carry on committing as you do, and patches publish themselves. Say "feat:" when you have
+# added something, and "feat!:" when you have broken something, and the number tells the six
+# services that depend on this whether the upgrade is safe. A version that always went up by one
+# would not.
+#
+# Put [skip release] in a commit message to publish nothing for that push.
+#
+# The workflow sets the version in the POM, commits it, tags it, creates the GitHub Release,
+# waits for JitPack to build it, and opens a pull request on each service. See RELEASING.md.
 name: Release
 
 on:
-  release:
-    types: [published]
-  # Re-runnable by hand, and rehearsable with dry_run.
+  push:
+    branches: [main]
+    paths-ignore:
+      # Changing the words cannot change the library, so it does not deserve a version.
+      - '**/*.md'
+      - '.gitignore'
+      - 'LICENSE'
+  # Still available by hand, to publish a specific number or to rehearse.
   workflow_dispatch:
     inputs:
-      tag:
-        description: 'Existing tag to release, for example 1.0.1'
-        required: true
+      version:
+        description: 'Version to publish. Leave empty to let the commits decide.'
+        required: false
         type: string
       dry_run:
-        description: 'Check and build everything, but do not ask JitPack or open pull requests'
+        description: 'Work everything out and build it, but create no tag, release or pull requests'
         required: false
         default: false
         type: boolean
+  release:
+    types: [published]
 
 permissions:
-  contents: read
+  contents: write
 
 concurrency:
-  group: release-${{ github.ref }}
+  group: release
   cancel-in-progress: false
 
 jobs:
   release:
-    name: Verify and publish
+    name: Publish
     runs-on: ubuntu-latest
     outputs:
       version: ${{ steps.version.outputs.version }}
       published: ${{ steps.jitpack.outputs.published }}
     steps:
-      - name: Work out which tag is being released
-        id: tag
-        env:
-          EVENT_TAG: ${{ github.event.release.tag_name }}
-          INPUT_TAG: ${{ inputs.tag }}
-        run: |
-          set -euo pipefail
-          tag="${EVENT_TAG:-$INPUT_TAG}"
-          if [ -z "$tag" ]; then
-            echo "::error::no tag to release - this runs on a published release or with a tag input"
-            exit 1
-          fi
-          echo "tag=$tag" >> "$GITHUB_OUTPUT"
-
       - uses: actions/checkout@v5
         with:
-          ref: ${{ steps.tag.outputs.tag }}
+          ref: ${{ github.event_name == 'release' && github.event.release.tag_name || 'main' }}
+          # Every tag and the whole history: the next version is counted from the last release,
+          # and a shallow clone cannot see it.
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
 
       - name: Set up JDK 21
         uses: actions/setup-java@v5
@@ -69,47 +76,110 @@ jobs:
           distribution: 'temurin'
           cache: maven
 
-      - name: Check the tag and the project version are the same text
+      - name: Work out the next version from the commits
         id: version
         env:
-          TAG: ${{ steps.tag.outputs.tag }}
+          EVENT_TAG: ${{ github.event.release.tag_name }}
+          INPUT_VERSION: ${{ inputs.version }}
+        run: |
+          set -euo pipefail
+
+          # A version somebody stated wins over a computed one: a published release names its
+          # own version, and the dispatch box is there for the times you want a specific number.
+          given="${EVENT_TAG:-$INPUT_VERSION}"
+          if [ -n "$given" ]; then
+            if [ "${given#v}" != "$given" ]; then
+              if [ -n "${EVENT_TAG:-}" ]; then
+                echo "::error::the release is tagged ${given}. On JitPack the tag becomes the"
+                echo "::error::version, so delete it and release ${given#v} instead."
+                exit 1
+              fi
+              echo "::warning::dropping the 'v' - JitPack serves the tag verbatim."
+              given="${given#v}"
+            fi
+            if ! echo "$given" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$'; then
+              echo "::error::'${given}' is not a version number. Use 1.0.1, or 1.1.0-rc.1."
+              exit 1
+            fi
+            echo "release=true" >> "$GITHUB_OUTPUT"
+            echo "version=${given}" >> "$GITHUB_OUTPUT"
+            echo "Releasing ${given}, as asked for."
+            exit 0
+          fi
+
+          latest_tag=$(git tag --list --sort=-v:refname | head -1 || true)
+          if [ -n "$latest_tag" ]; then
+            commits=$(git log --format=%B "${latest_tag}..HEAD")
+          else
+            commits=$(git log --format=%B)
+          fi
+
+          LATEST_TAG="$latest_tag" \
+          POM_VERSION="$(./mvnw --batch-mode --no-transfer-progress \
+            help:evaluate -Dexpression=project.version -q -DforceStdout)" \
+          COMMITS="$commits" \
+          python3 .github/scripts/next_version.py
+
+      - name: Nothing to release
+        if: ${{ steps.version.outputs.release != 'true' }}
+        run: |
+          {
+            echo "### Nothing published"
+            echo
+            echo "${{ steps.version.outputs.reason }}"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      # ---- Everything below happens only when there is a version to publish ----------------
+
+      - name: Check this version has not been released already
+        if: ${{ steps.version.outputs.release == 'true' }}
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          set -euo pipefail
+          # JitPack caches a result per version, including a failure, so reusing a number serves
+          # whatever it decided the first time.
+          if git ls-remote --exit-code --tags origin "refs/tags/${VERSION}" >/dev/null 2>&1; then
+            if [ "${{ github.event_name }}" != "release" ]; then
+              echo "::error::tag ${VERSION} already exists."
+              echo "::error::Push another change, or run this by hand with a version number."
+              exit 1
+            fi
+          fi
+          echo "Version ${VERSION} is free."
+
+      - name: Put the version in the POM
+        # Not for a published release: that tag already carries its own POM, and rewriting it
+        # would mean serving something different from what was tagged.
+        if: ${{ steps.version.outputs.release == 'true' && github.event_name != 'release' }}
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          set -euo pipefail
+          ./mvnw --batch-mode --no-transfer-progress \
+            versions:set -DnewVersion="${VERSION}" -DgenerateBackupPoms=false
+
+      - name: Check the tag and the POM agree
+        if: ${{ steps.version.outputs.release == 'true' && github.event_name == 'release' }}
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
         run: |
           set -euo pipefail
           actual=$(./mvnw --batch-mode --no-transfer-progress \
             help:evaluate -Dexpression=project.version -q -DforceStdout)
-
-          # With JitPack the tag *is* the version a consumer writes, so a `v` prefix would put
-          # <version>v1.0.1</version> into six service POMs. One convention: plain versions.
-          case "$TAG" in
-            v*)
-              echo "::error::tag ${TAG} starts with 'v'. On JitPack the tag becomes the version"
-              echo "::error::consumers write, so tag it ${TAG#v} instead and release that."
-              exit 1
-              ;;
-          esac
-
-          if [ "$TAG" != "$actual" ]; then
-            echo "::error::tag ${TAG} and the POM version ${actual} disagree."
-            echo "::error::JitPack builds the tag, so what consumers get would not be what the"
-            echo "::error::POM says. Set the POM to ${TAG}, commit, and tag that commit."
+          if [ "$VERSION" != "$actual" ]; then
+            echo "::error::the tag says ${VERSION} and the POM says ${actual}."
+            echo "::error::JitPack builds the tag, so consumers would not get what the POM says."
+            echo "::error::Easiest fix: delete this release and just push - the version is"
+            echo "::error::worked out and tagged for you."
             exit 1
           fi
 
-          case "$actual" in
-            *SNAPSHOT*)
-              echo "::error::${actual} is a snapshot. Release a fixed version."
-              exit 1
-              ;;
-          esac
-
-          echo "version=$actual" >> "$GITHUB_OUTPUT"
-          echo "Releasing ${actual}"
-
       - name: Build exactly what JitPack will build
-        # The same command JitPack runs, so a tag that builds here builds there. Tests are not
-        # run on Actions on this platform: run ./verify.sh before you tag, which RELEASING.md
-        # makes step one for exactly this reason. What this proves is that the tag compiles and
-        # produces all three jars from a clean checkout.
+        # The same command jitpack.yml runs, through the same pinned Maven, so a version that
+        # builds here builds there. Test cases are not run on Actions on this platform:
+        # ./verify.sh runs them on your machine.
+        if: ${{ steps.version.outputs.release == 'true' }}
         env:
           VERSION: ${{ steps.version.outputs.version }}
         run: |
@@ -121,9 +191,39 @@ jobs:
             echo "built ${file}"
           done
 
+      - name: Commit the version, tag it, and create the release
+        if: ${{ steps.version.outputs.release == 'true' && github.event_name != 'release' && inputs.dry_run != true }}
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          git add pom.xml
+          # The tag goes on a commit whose POM already says this version, which is what makes
+          # "the tag is the version" true rather than merely intended. A push made with this
+          # token does not start another workflow run, so this cannot loop.
+          git commit -m "chore(release): ${VERSION}"
+          git push origin HEAD:main
+
+          git tag "${VERSION}"
+          git push origin "${VERSION}"
+
+          gh release create "${VERSION}" --title "${VERSION}" --notes "saddad-common ${VERSION}
+
+          \`\`\`xml
+          <dependency>
+              <groupId>com.github.${GITHUB_REPOSITORY_OWNER}</groupId>
+              <artifactId>saddad-common</artifactId>
+              <version>${VERSION}</version>
+          </dependency>
+          \`\`\`"
+
       - name: Ask JitPack to build it, and wait for the answer
         id: jitpack
-        if: ${{ github.event_name == 'release' || inputs.dry_run == false }}
+        if: ${{ steps.version.outputs.release == 'true' && inputs.dry_run != true }}
         env:
           VERSION: ${{ steps.version.outputs.version }}
           OWNER: ${{ github.repository_owner }}
@@ -132,7 +232,7 @@ jobs:
           base="https://jitpack.io/com/github/${OWNER}/saddad-common/${VERSION}"
 
           # Requesting the POM is what makes JitPack start building; the API then reports how it
-          # went.
+          # went. Doing it here means a broken build is found now, not by the next developer.
           echo "Asking JitPack for com.github.${OWNER}:saddad-common:${VERSION}"
           curl -s -o /dev/null "${base}/saddad-common-${VERSION}.pom" || true
 
@@ -141,13 +241,14 @@ jobs:
               | python3 -c "import sys,json; print(json.load(sys.stdin).get('status',''))" 2>/dev/null || echo "")
             case "$status" in
               ok)
-                echo "JitPack built ${VERSION} successfully."
+                echo "JitPack built ${VERSION}. It is available now."
                 echo "published=true" >> "$GITHUB_OUTPUT"
                 exit 0
                 ;;
               Error|error)
-                echo "::error::JitPack failed to build ${VERSION}."
-                echo "::error::The log says why: ${base}/build.log"
+                echo "::error::JitPack failed to build ${VERSION}. The log says why:"
+                echo "::error::${base}/build.log"
+                curl -s "${base}/build.log" | tail -30
                 exit 1
                 ;;
               *)
@@ -157,35 +258,40 @@ jobs:
             esac
           done
 
-          # Not a failed release: the tag is fine and JitPack will finish on its own.
-          echo "::warning::JitPack was still building after ten minutes."
+          echo "::warning::JitPack was still building after ten minutes. The release is fine."
           echo "::warning::Check https://jitpack.io/#${OWNER}/saddad-common, then run"
           echo "::warning::'Update consuming services' by hand for ${VERSION}."
           echo "published=false" >> "$GITHUB_OUTPUT"
 
       - name: Summary
-        if: always()
+        if: ${{ always() && steps.version.outputs.release == 'true' }}
         env:
           VERSION: ${{ steps.version.outputs.version }}
           PUBLISHED: ${{ steps.jitpack.outputs.published }}
+          BUMP: ${{ steps.version.outputs.bump }}
           OWNER: ${{ github.repository_owner }}
         run: |
           {
-            echo "## Release"
+            echo "## saddad-common ${VERSION}"
             echo
             if [ "${PUBLISHED:-false}" = "true" ]; then
-              echo "JitPack build: **SUCCESS** - the version is available now."
+              echo "**Published.** JitPack has built this version and it is available now."
             else
-              echo "JitPack build: **not confirmed** (dry run, still building, or stopped earlier)."
+              echo "**Not confirmed** - a dry run, still building, or stopped by a check above."
             fi
             echo
-            echo "Consumers use:"
+            echo "Version decided by: \`${BUMP:-given}\`"
             echo
             echo '```xml'
+            echo "<repository>"
+            echo "    <id>jitpack.io</id>"
+            echo "    <url>https://jitpack.io</url>"
+            echo "</repository>"
+            echo
             echo "<dependency>"
             echo "    <groupId>com.github.${OWNER}</groupId>"
             echo "    <artifactId>saddad-common</artifactId>"
-            echo "    <version>${VERSION:-unknown}</version>"
+            echo "    <version>${VERSION}</version>"
             echo "</dependency>"
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"

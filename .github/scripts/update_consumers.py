@@ -43,9 +43,14 @@ API = "https://api.github.com"
 ARTIFACT_ID = "saddad-common"
 GROUP_ID = "com.github.saddad-platform"
 
-# The branch a pull request is opened from. Version-specific, which is what makes a second run
-# for the same version find the first run's work instead of duplicating it.
-BRANCH_PREFIX = "chore/update-saddad-common-"
+# The branch every update goes onto, in every consumer.
+#
+# Deliberately not version-specific. Releases here are automatic - one per push to main - so a
+# branch per version would mean a new pull request per service per release: six services times
+# ten pushes is sixty pull requests in a day, and a reviewer who ignores all of them. One rolling
+# branch per service means one pull request per service, re-pointed at the newest version each
+# time, which is the thing a service owner can actually keep on top of.
+BRANCH = "chore/update-saddad-common"
 
 
 # --------------------------------------------------------------------------------------- POM
@@ -292,20 +297,28 @@ def update_consumer(github: GitHub, repository: str, version: str, release_url: 
             "before merging; no application source has been modified."
         )
 
-    branch = f"{BRANCH_PREFIX}{version}"
+    branch = BRANCH
     if dry_run:
         return Outcome(repository, "would-create",
                        f"{change.previous_version} -> {version} on {branch}",
                        previous_version=change.previous_version, location=location, branch=branch)
 
-    # Create the branch, or accept the one a previous run created.
+    # Create the branch, or move the existing one back onto the head of the base branch.
+    #
+    # The move matters with a rolling branch: it may still be carrying an upgrade from three
+    # releases ago on top of a base that has moved on, and a pull request whose diff includes
+    # everything that has landed since is not a one-line change any more. Forced, because that
+    # is exactly what re-pointing a branch means, and nothing but this automation ever writes
+    # to it.
     base_sha = github.get(f"/repos/{repository}/git/ref/heads/{base_branch}")["object"]["sha"]
     try:
         github.post(f"/repos/{repository}/git/refs",
                     {"ref": f"refs/heads/{branch}", "sha": base_sha})
     except urllib.error.HTTPError as error:
-        if error.code != 422:  # 422 is "already exists", which is the idempotent case.
+        if error.code != 422:  # 422 is "already exists".
             raise
+        github.post(f"/repos/{repository}/git/refs/heads/{branch}",
+                    {"sha": base_sha, "force": True})
 
     # Re-read the file on the branch: a previous run may already have written it, and the blob
     # sha of the branch's copy is what the contents API requires to accept an update.
@@ -323,17 +336,25 @@ def update_consumer(github: GitHub, repository: str, version: str, release_url: 
         })
 
     owner = repository.split("/")[0]
+    body = pull_request_body(change.previous_version, version, location, release_url, notes)
+
     existing = github.get(f"/repos/{repository}/pulls?head={owner}:{branch}&state=open")
     if existing:
-        return Outcome(repository, "updated", "reused the pull request already open",
+        # Re-pointed rather than replaced: the same pull request now offers the newer version,
+        # so its review history and any conversation on it survive.
+        pull = existing[0]
+        github.post(f"/repos/{repository}/pulls/{pull['number']}",
+                    {"title": message, "body": body})
+        return Outcome(repository, "updated",
+                       f"{change.previous_version} -> {version}, in the pull request already open",
                        previous_version=change.previous_version, location=location,
-                       branch=branch, url=existing[0]["html_url"])
+                       branch=branch, url=pull["html_url"])
 
     pull = github.post(f"/repos/{repository}/pulls", {
         "title": message,
         "head": branch,
         "base": base_branch,
-        "body": pull_request_body(change.previous_version, version, location, release_url, notes),
+        "body": body,
     })
     return Outcome(repository, "created", f"{change.previous_version} -> {version}",
                    previous_version=change.previous_version, location=location,

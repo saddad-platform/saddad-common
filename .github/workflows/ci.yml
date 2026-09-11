@@ -1,20 +1,18 @@
-# Builds saddad-common on every change.
+# Builds saddad-common, on a pull request or when you press the button.
+#
+# Not on a push to main: the Release workflow already builds every push there, and it does so
+# with the same command, so running this as well would be the same build twice.
 #
 # It does not run test cases. That is this platform's rule for GitHub Actions: tests run on a
 # developer's machine through ./verify.sh, before pushing.
 #
-# What it does do is worth having on every push - it proves the project still compiles and still
-# produces the three jars JitPack will serve, from a clean checkout on a machine that is not
-# yours. That catches exactly the things a local build hides: a file that was never committed, a
-# dependency that only exists in your own ~/.m2, a difference in JDK.
-#
-# This repository is public, and GitHub Actions is free and unlimited on public repositories, so
-# none of this is billed. The minutes that are billed belong to the private service repositories.
+# What it does prove is that the project compiles and produces the three jars JitPack will serve,
+# from a clean checkout on a machine that is not yours - which catches exactly what a local build
+# hides: a file that was never committed, a dependency that only exists in your own ~/.m2, a
+# difference in JDK.
 name: Build
 
 on:
-  push:
-    branches: [main]
   pull_request:
     branches: [main]
   workflow_dispatch:

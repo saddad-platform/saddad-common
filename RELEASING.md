@@ -4,60 +4,50 @@ The library is distributed by **JitPack**. There is no account to create, no key
 no secret to store: JitPack watches this repository, and when somebody asks for a version it
 clones that git tag, builds it, and serves the result.
 
-So releasing is: **set the version, tag it, publish a GitHub Release.** Everything else happens on
-its own.
+## You do not release it. Pushing releases it.
 
-## The one rule
+Push to `main` and a version publishes itself: the workflow works out the number, puts it in the
+POM, commits it, tags it, creates the GitHub Release, waits for JitPack to build it, and opens a
+pull request on every service that uses the library.
 
-**The git tag is the version.** JitPack does not read your POM to decide what to call a release;
-it uses the tag name. So the tag and the POM version have to be the same text:
+The only thing you control is **the number**, and you control it with the commit message you were
+writing anyway:
 
-| Tag | What consumers would write |
-|---|---|
-| `1.0.1` | `<version>1.0.1</version>` |
-| `v1.0.1` | `<version>v1.0.1</version>` — which is why we do not do this |
+| Your commit message | Version goes | Meaning |
+|---|---|---|
+| `Fix the wallet balance` | `1.0.0` → `1.0.1` | patch: nothing a caller can see |
+| `fix: the report period` | `1.0.1` → `1.0.2` | patch |
+| `feat: add the corporate report` | `1.0.2` → `1.1.0` | minor: something new, nothing removed |
+| `feat!: rename the outcomes` | `1.1.0` → `2.0.0` | major: something will break |
+| `refactor(api)!: drop the old envelope` | `2.0.0` → `3.0.0` | major |
 
-Tags here carry **no `v` prefix**. The release workflow refuses a `v` tag and tells you to
-re-tag, rather than letting six services end up with a `v` in their POMs.
+Ordinary messages are patches, which is the safe default and how this repository has been written
+so far. You only have to think about it when you add something (`feat:`) or break something
+(`!`) - and then the number is telling six services whether the upgrade is safe, which is the
+entire reason versions exist.
 
-## Releasing, step by step
+**Before you push, run the tests. Nothing on GitHub does:**
 
-1. **Check it locally. This is the only place the tests run.** Test cases are not run on GitHub
-   Actions on this platform, so nothing else will catch a failure for you:
+```bash
+./verify.sh
+```
 
-   ```bash
-   ./verify.sh
-   ```
+### Not publishing a particular push
 
-2. **Choose the version.** This is a judgement about the change, so nothing automates it:
+Put `[skip release]` anywhere in the commit message. Documentation-only changes are skipped
+automatically.
 
-   | Change | Example |
-   |---|---|
-   | Bug fix, internal change, nothing a caller can see | `1.0.0` → `1.0.1` |
-   | New API, new optional behaviour, nothing removed | `1.0.1` → `1.1.0` |
-   | A public API changed or was removed, or behaviour changed incompatibly | `1.1.0` → `2.0.0` |
+### Publishing a specific number
 
-3. **Set it in the POM and push:**
+Actions → **Release** → **Run workflow**, and type the version. Leave the box empty to let the
+commits decide, as a push would. Tick **dry run** to work everything out and build it without
+creating a tag, a release or any pull requests.
 
-   ```bash
-   ./mvnw versions:set -DnewVersion=1.0.1 -DgenerateBackupPoms=false
-   git commit -am "chore(release): 1.0.1"
-   git push
-   ```
+### The one rule behind all of this
 
-4. **Publish a GitHub Release** on that commit, tagged exactly `1.0.1`.
-
-5. **Watch the Release workflow.** It checks the tag and the POM agree, builds what JitPack will
-   build, asks JitPack to build it now and waits for the answer, then opens a pull request on
-   every service that uses the library. It does not run the tests - step 1 did that.
-
-6. **Review those pull requests.** One per service, each changing one line. Merging one does not
-   release that service; that stays the service owner's decision.
-
-### Rehearsing
-
-Actions tab → **Release** → **Run workflow**, give it an existing tag and set **dry run** to
-`true`. Everything happens except asking JitPack and opening pull requests.
+**The git tag is the version**, because JitPack serves the tag name verbatim. That is why tags
+here have no `v`: a `v1.0.1` tag would put `<version>v1.0.1</version>` into six service POMs. The
+workflow creates the tags, so this is mostly something you no longer have to remember.
 
 ### If something goes wrong
 

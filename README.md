@@ -89,9 +89,11 @@ it up from there instead of JitPack:
 
 ## Releasing
 
-Set the version in `pom.xml`, push, and publish a GitHub Release whose tag is exactly that
-version. JitPack does the rest, and every service that uses the library gets a pull request
-offering the upgrade. [RELEASING.md](RELEASING.md) has the detail.
+**Push to `main`.** A version publishes itself: the workflow reads your commit messages to decide
+whether it is a patch, a minor or a major, sets it in the POM, tags it, creates the release, waits
+for JitPack, and opens a pull request on every service that uses the library. Say `feat:` when you
+add something and `feat!:` when you break something; anything else is a patch.
+[RELEASING.md](RELEASING.md) has the detail.
 
 The tests run on your machine, not on GitHub Actions. Run them before you push, and always
 before you tag a release:

@@ -34,8 +34,7 @@ done
 echo
 echo "==> 3/3  Release automation tests"
 python3 .github/scripts/test_update_consumers.py 2>&1 | tail -3
+python3 .github/scripts/test_next_version.py 2>&1 | tail -3
 
 echo
-version_line=$(grep -m1 '<version>' pom.xml || true)
-echo "Done. To release this, tag it with the exact POM version and publish a GitHub Release."
-echo "     POM version: ${version}"
+echo "Done. Push to main and this publishes itself - the commit messages decide the version."
