@@ -1,6 +1,8 @@
 package com.sadad.common.web;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.sadad.common.errors.ErrorCode;
+import com.sadad.common.errors.ErrorMessageResolver;
 import com.sadad.common.core.api.ApiError;
 import com.sadad.common.core.context.RequestContext;
 import jakarta.servlet.http.HttpServletRequest;
@@ -26,19 +28,27 @@ import java.io.IOException;
 public class RestAccessDeniedHandler implements AccessDeniedHandler {
 
     private final ObjectMapper objectMapper;
+    private final ErrorMessageResolver messages;
 
-    public RestAccessDeniedHandler(ObjectMapper objectMapper) {
+    public RestAccessDeniedHandler(ObjectMapper objectMapper, ErrorMessageResolver messages) {
         this.objectMapper = objectMapper;
+        this.messages = messages;
     }
 
     @Override
     public void handle(HttpServletRequest request, HttpServletResponse response, AccessDeniedException accessDeniedException)
             throws IOException {
         String requestId = RequestContext.currentRequestId();
-        ApiError error = ApiError.of("ACCESS_DENIED", "You do not have permission to perform this action", requestId);
+        ApiError error = ApiError.of(ErrorCode.ACCESS_DENIED.code(),
+                messages.resolve(ErrorCode.ACCESS_DENIED.code(), RequestContext.currentLocale(),
+                        java.util.Map.of(), ErrorCode.ACCESS_DENIED.getDefaultMessageEn()),
+                requestId);
 
         response.setStatus(HttpServletResponse.SC_FORBIDDEN);
+        // Charset stated explicitly: getWriter() otherwise encodes with the container
+        // default, and every Arabic character in a translated message becomes '?'.
         response.setContentType(MediaType.APPLICATION_JSON_VALUE);
+        response.setCharacterEncoding(java.nio.charset.StandardCharsets.UTF_8.name());
         response.getWriter().write(objectMapper.writeValueAsString(error));
     }
 }

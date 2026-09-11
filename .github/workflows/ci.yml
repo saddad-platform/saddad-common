@@ -1,0 +1,89 @@
+# Builds and tests saddad-common on every change.
+#
+# This is the verification half of what the old `publish.yml` did. That workflow ran the tests
+# and then deployed to GitHub Packages on every push to main, which meant a normal commit
+# produced a publication - the thing a release process exists to stop. Testing on every change
+# is worth keeping; publishing on every change is not, so the two have been separated and
+# publication now happens only from `release.yml`, only from a GitHub Release.
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+# This workflow reads the repository and nothing else. Saying so means a compromised action
+# cannot do anything else.
+permissions:
+  contents: read
+
+concurrency:
+  # One run per branch: a second push supersedes the first, and cancelling the outdated run
+  # costs nothing because nothing here is published.
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    name: Build and test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v4
+        with:
+          java-version: '21'
+          distribution: 'temurin'
+          cache: maven
+
+      # `verify`, not `test`: it runs the tests and then packages the jar, so a change that
+      # compiles and passes but cannot be assembled is caught here rather than during a
+      # release, when the person waiting is doing something time-sensitive.
+      - name: Build and test
+        run: mvn --batch-mode --no-transfer-progress verify
+
+      # The release build produces two more artifacts than an ordinary one, and both have
+      # their own ways of failing - Javadoc on a malformed tag, the source plugin on an
+      # unreadable file. Building them here, unsigned, means a release is never the first time
+      # anybody finds out. Signing and publishing are deliberately not exercised: they need
+      # secrets, and CI runs on pull requests from anywhere.
+      - name: Build the release artifacts, unsigned
+        run: >
+          mvn --batch-mode --no-transfer-progress
+          -Prelease -Dgpg.skip=true -DskipTests package
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      # The release automation edits other people's repositories, so the logic that decides
+      # what to edit is tested on every change to it rather than the first time it runs.
+      - name: Test the release scripts
+        run: |
+          python3 .github/scripts/test_update_consumers.py
+          python3 .github/scripts/test_check_release_metadata.py
+
+      # A warning rather than a failure. This is the check that will stop the next release
+      # while the licence is undecided, and saying so on every build is useful; failing every
+      # build over a known, documented gap would only teach people to ignore a red tick.
+      - name: Report on release readiness
+        continue-on-error: true
+        run: python3 .github/scripts/check_release_metadata.py
+
+      - name: Check the release artifacts exist
+        run: |
+          set -euo pipefail
+          version=$(mvn --batch-mode --no-transfer-progress \
+            help:evaluate -Dexpression=project.version -q -DforceStdout)
+          for suffix in "" "-sources" "-javadoc"; do
+            file="target/saddad-common-${version}${suffix}.jar"
+            if [ ! -f "$file" ]; then
+              echo "::error::the release build did not produce ${file}"
+              exit 1
+            fi
+            echo "found ${file}"
+          done

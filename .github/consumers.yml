@@ -1,0 +1,32 @@
+# Which repositories the dependency-update automation looks at.
+#
+# Discovery is the default and should stay that way. After a release, every repository in the
+# organisation is listed and its `pom.xml` read; a repository that declares the saddad-common
+# artifact gets a pull request. Nothing has to be registered here for that to happen, which is
+# the point: a hand-maintained list is wrong the first time somebody adds a service and forgets
+# to add it here, and nobody finds out until a release has quietly skipped it.
+#
+# At the time of writing, discovery finds these six services, each declaring the version inline
+# in its own `pom.xml`:
+#
+#     saddad-admin  saddad-auth  saddad-employees
+#     saddad-onboarding  saddad-violations  saddad-wallet
+#
+# saddad-gateway is in the organisation and is deliberately not in that list: it does not
+# depend on saddad-common. Discovery works that out by reading its POM, so it needs no entry
+# here either.
+#
+# The two lists below are for the cases discovery cannot cover on its own.
+
+# Read the organisation's repositories. Turn this off only to run against `include` alone -
+# useful for rehearsing a change to the automation against one repository.
+discover: true
+
+# Repositories to examine in addition to whatever discovery finds. For a consumer outside the
+# organisation, or one in a different organisation the credential can still reach. Full names,
+# for example `other-org/some-service`.
+include: []
+
+# Repositories to leave alone even if they do depend on the library. For a service that pins
+# its version deliberately, or one being decommissioned. Full names, as above.
+exclude: []

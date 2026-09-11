@@ -15,13 +15,24 @@ import org.springframework.web.filter.OncePerRequestFilter;
 import java.io.IOException;
 import java.util.UUID;
 
+/**
+ * Seeds the per-request {@link RequestContext} with the transport-level facts a request
+ * carries on its own: correlation/request ids, channel, locale and client IP.
+ *
+ * <p><strong>Tenant is deliberately absent here.</strong> This filter used to read an
+ * {@code X-Tenant-Id} request header into the context, which meant an unauthenticated
+ * request could pre-seed a tenant scope of its own choosing before any authentication
+ * filter ran. Tenant scope is now populated in exactly one place -
+ * {@link com.sadad.common.security.JwtAuthenticationFilter}, from the verified JWT claim -
+ * matching saddad-docs/02-SOLUTION-ARCHITECTURE.md Section 7: "Never trust a tenant
+ * identifier supplied by the client. Resolve tenant context from authenticated claims."
+ */
 @Component("sadadRequestContextFilter")
 @Order(Ordered.HIGHEST_PRECEDENCE)
 public class SadadRequestContextFilter extends OncePerRequestFilter {
 
     public static final String HEADER_CORRELATION_ID = "X-Correlation-Id";
     public static final String HEADER_REQUEST_ID = "X-Request-Id";
-    public static final String HEADER_TENANT_ID = "X-Tenant-Id";
     public static final String HEADER_CHANNEL = "X-Channel";
 
     @Override
@@ -38,7 +49,6 @@ public class SadadRequestContextFilter extends OncePerRequestFilter {
             requestId = UUID.randomUUID().toString();
         }
 
-        String tenantId = request.getHeader(HEADER_TENANT_ID);
         String channel = request.getHeader(HEADER_CHANNEL);
         String locale = request.getHeader("Accept-Language");
         if (locale != null && locale.contains("ar")) {
@@ -50,7 +60,6 @@ public class SadadRequestContextFilter extends OncePerRequestFilter {
         RequestContext context = RequestContext.builder()
                 .correlationId(correlationId)
                 .requestId(requestId)
-                .tenantId(tenantId)
                 .channel(StringUtils.hasText(channel) ? channel : "WEB")
                 .locale(locale)
                 .clientIp(request.getRemoteAddr())
@@ -60,9 +69,6 @@ public class SadadRequestContextFilter extends OncePerRequestFilter {
 
         MDC.put("correlationId", correlationId);
         MDC.put("requestId", requestId);
-        if (StringUtils.hasText(tenantId)) {
-            MDC.put("tenantId", tenantId);
-        }
 
         response.setHeader(HEADER_CORRELATION_ID, correlationId);
         response.setHeader(HEADER_REQUEST_ID, requestId);

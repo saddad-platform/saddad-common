@@ -1,0 +1,112 @@
+# Opens a dependency-update pull request on every service that uses saddad-common.
+#
+# Called by `release.yml` once a version really is on Maven Central, and runnable on its own
+# from the Actions tab - which matters, because a consumer being briefly unreachable must not
+# mean the whole thing has to be released again. Running it twice for the same version is
+# safe: it reuses the branch and the pull request it already opened.
+#
+# What it deliberately does not do: merge anything, change any service's own version, or touch
+# any file other than the one line that names the library version. See `.github/scripts/
+# update_consumers.py`.
+name: Update consuming services
+
+on:
+  workflow_call:
+    inputs:
+      version:
+        description: 'The saddad-common version consumers should move to'
+        required: true
+        type: string
+      dry_run:
+        description: 'Work out every change and report it, but open nothing'
+        required: false
+        default: false
+        type: boolean
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'The saddad-common version consumers should move to, for example 1.0.1'
+        required: true
+        type: string
+      dry_run:
+        description: 'Work out every change and report it, but open nothing'
+        required: false
+        default: true
+        type: boolean
+
+# Nothing here writes to this repository. Writing to the *consumer* repositories needs a
+# credential of its own, because a job's own GITHUB_TOKEN is scoped to the repository it runs
+# in and cannot open a pull request anywhere else.
+permissions:
+  contents: read
+
+concurrency:
+  # One pass per version. Two overlapping passes would race to create the same branch.
+  group: update-consumers-${{ inputs.version }}
+  cancel-in-progress: false
+
+jobs:
+  update:
+    name: Open dependency pull requests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # Preferred: a GitHub App installed on the consuming repositories with only Contents and
+      # Pull requests write. Its token is minted for this run and expires with it, and it is
+      # tied to the App rather than to a person - so nobody's personal access disappears with
+      # them, and the permissions can be seen and revoked in one place.
+      - name: Mint a token from the GitHub App
+        id: app-token
+        if: ${{ vars.CONSUMER_APP_ID != '' }}
+        uses: actions/create-github-app-token@v1
+        with:
+          app-id: ${{ vars.CONSUMER_APP_ID }}
+          private-key: ${{ secrets.CONSUMER_APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+
+      - name: Choose the credential
+        id: credential
+        env:
+          APP_TOKEN: ${{ steps.app-token.outputs.token }}
+          PAT: ${{ secrets.CONSUMER_UPDATE_TOKEN }}
+        run: |
+          set -euo pipefail
+          # A fallback rather than the default: a personal access token works, but it carries
+          # somebody's own access and outlives the run. Recorded here so the summary can say
+          # which was used, without ever printing either.
+          if [ -n "${APP_TOKEN:-}" ]; then
+            echo "source=github-app" >> "$GITHUB_OUTPUT"
+          elif [ -n "${PAT:-}" ]; then
+            echo "source=personal-access-token" >> "$GITHUB_OUTPUT"
+          else
+            echo "::error::no credential for writing to the consuming repositories."
+            echo "::error::MANUAL CONFIGURATION REQUIRED: install the GitHub App and set the"
+            echo "::error::CONSUMER_APP_ID variable and CONSUMER_APP_PRIVATE_KEY secret, or set"
+            echo "::error::the CONSUMER_UPDATE_TOKEN secret. See RELEASING.md."
+            exit 1
+          fi
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      # The only dependency, and only for reading consumers.yml. Everything else in the script
+      # uses the standard library, so a package index being unreachable cannot stop a release
+      # from reaching the services that need it.
+      - name: Install the YAML reader
+        run: python3 -m pip install --quiet pyyaml
+
+      - name: Update consumers
+        env:
+          # Whichever of the two was found. Never echoed; the script never logs it.
+          GITHUB_TOKEN: ${{ steps.app-token.outputs.token || secrets.CONSUMER_UPDATE_TOKEN }}
+          ORGANIZATION: ${{ github.repository_owner }}
+          LIBRARY_VERSION: ${{ inputs.version }}
+          DRY_RUN: ${{ inputs.dry_run }}
+          RELEASE_URL: https://github.com/${{ github.repository }}/releases/tag/v${{ inputs.version }}
+          CREDENTIAL_SOURCE: ${{ steps.credential.outputs.source }}
+        # The script reports per-consumer failures and exits 0: one unreachable repository is
+        # not a reason to call a successful Maven Central publication a failure.
+        run: python3 .github/scripts/update_consumers.py

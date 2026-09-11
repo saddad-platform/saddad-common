@@ -1,6 +1,8 @@
 package com.sadad.common.web;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.sadad.common.errors.ErrorCode;
+import com.sadad.common.errors.ErrorMessageResolver;
 import com.sadad.common.core.api.ApiError;
 import com.sadad.common.core.context.RequestContext;
 import com.sadad.common.security.JwtAuthenticationFilter;
@@ -27,9 +29,11 @@ import java.io.IOException;
 public class RestAuthenticationEntryPoint implements AuthenticationEntryPoint {
 
     private final ObjectMapper objectMapper;
+    private final ErrorMessageResolver messages;
 
-    public RestAuthenticationEntryPoint(ObjectMapper objectMapper) {
+    public RestAuthenticationEntryPoint(ObjectMapper objectMapper, ErrorMessageResolver messages) {
         this.objectMapper = objectMapper;
+        this.messages = messages;
     }
 
     @Override
@@ -39,11 +43,19 @@ public class RestAuthenticationEntryPoint implements AuthenticationEntryPoint {
         boolean sessionSuperseded = Boolean.TRUE.equals(request.getAttribute(JwtAuthenticationFilter.SESSION_SUPERSEDED_ATTRIBUTE));
 
         ApiError error = sessionSuperseded
-                ? ApiError.of("SESSION_SUPERSEDED", "Your session is no longer active - you may have signed in elsewhere or signed out. Please sign in again.", requestId)
-                : ApiError.of("UNAUTHENTICATED", "Authentication is required to access this resource.", requestId);
+                ? ApiError.of(ErrorCode.SESSION_SUPERSEDED.code(), say(ErrorCode.SESSION_SUPERSEDED), requestId)
+                : ApiError.of(ErrorCode.UNAUTHENTICATED.code(), say(ErrorCode.UNAUTHENTICATED), requestId);
 
         response.setStatus(HttpServletResponse.SC_UNAUTHORIZED);
+        // Charset stated explicitly: getWriter() otherwise encodes with the container
+        // default, and every Arabic character in a translated message becomes '?'.
         response.setContentType(MediaType.APPLICATION_JSON_VALUE);
+        response.setCharacterEncoding(java.nio.charset.StandardCharsets.UTF_8.name());
         response.getWriter().write(objectMapper.writeValueAsString(error));
+    }
+
+    private String say(ErrorCode code) {
+        return messages.resolve(code.code(), RequestContext.currentLocale(),
+                java.util.Map.of(), code.getDefaultMessageEn());
     }
 }

@@ -39,6 +39,16 @@ public class RequestContext {
         return ctx != null ? ctx.getUserId() : null;
     }
 
+    /**
+     * The language this request asked for, "ar" or "en". Defaults to Arabic, which is the
+     * platform's primary language and what a caller that says nothing should get - the
+     * portals both default to Arabic too.
+     */
+    public static String currentLocale() {
+        RequestContext context = get();
+        return context == null || context.locale == null ? "ar" : context.locale;
+    }
+
     public static String currentRequestId() {
         RequestContext ctx = get();
         return ctx != null ? ctx.getRequestId() : null;

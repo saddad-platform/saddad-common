@@ -35,6 +35,24 @@ public class JwtTokenProvider {
      *                  sign-in rotates the user's active session (see {@link SessionRegistry}).
      */
     public String createToken(String userId, String tenantId, String crNumber, List<String> roles, String sessionId) {
+        return createToken(userId, tenantId, crNumber, roles, sessionId, null);
+    }
+
+    /**
+     * @param permissions when non-null, embedded as the {@code perms} claim so that services
+     *                    <em>other than the issuer</em> can enforce the same authorisation
+     *                    the issuer does.
+     *
+     *                    <p>The issuer itself should keep resolving permissions from its own
+     *                    store on each request - that is what makes a revocation take effect
+     *                    immediately. This claim exists for the services that have no access
+     *                    to that store and would otherwise enforce nothing at all: they
+     *                    accept up to one token lifetime of staleness, which is a far better
+     *                    trade than an endpoint that trusts any authenticated caller while
+     *                    the interface in front of it implies otherwise.
+     */
+    public String createToken(String userId, String tenantId, String crNumber, List<String> roles,
+                              String sessionId, List<String> permissions) {
         Date now = new Date();
         Date validity = new Date(now.getTime() + validityInMilliseconds);
 
@@ -45,6 +63,9 @@ public class JwtTokenProvider {
                 .claim("roles", roles);
         if (sessionId != null) {
             builder.claim("sid", sessionId);
+        }
+        if (permissions != null && !permissions.isEmpty()) {
+            builder.claim("perms", permissions);
         }
         return builder
                 .issuedAt(now)

@@ -1,0 +1,245 @@
+# Publishes saddad-common to Maven Central, and only ever from a GitHub Release.
+#
+# The rule this workflow exists to enforce: a published Maven Central version is permanent and
+# cannot be replaced. Everything before the upload step is therefore a check that the thing
+# about to become permanent is the thing the maintainer meant - the tag and the POM agree, the
+# version is not a snapshot, that version is not already on Central, the licence metadata
+# Central requires is present, the tests pass, and every artifact and signature was produced.
+# Any one of them failing stops the run before a single byte is uploaded.
+#
+# See RELEASING.md for the maintainer's side of this, and for the one-time account setup it
+# assumes.
+name: Release
+
+on:
+  release:
+    types: [published]
+  # Re-runnable by hand for the case where publication succeeded and something after it did
+  # not, and for rehearsing the whole thing with `dry_run`.
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Existing release tag to publish, for example v1.0.1'
+        required: true
+        type: string
+      dry_run:
+        description: 'Run every check and build every artifact, but publish nothing'
+        required: false
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+
+concurrency:
+  # Never two publications at once. Unlike CI this must not cancel a run in progress: a
+  # cancelled upload can leave a half-uploaded bundle in the portal.
+  group: release-maven-central
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    name: Publish to Maven Central
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      published: ${{ steps.publish.outputs.published }}
+    steps:
+      - name: Work out which tag is being released
+        id: tag
+        env:
+          EVENT_TAG: ${{ github.event.release.tag_name }}
+          INPUT_TAG: ${{ inputs.tag }}
+        run: |
+          set -euo pipefail
+          tag="${EVENT_TAG:-$INPUT_TAG}"
+          if [ -z "$tag" ]; then
+            echo "::error::no tag to release - this workflow runs on a published release or with a tag input"
+            exit 1
+          fi
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          echo "Releasing tag $tag"
+
+      - uses: actions/checkout@v4
+        with:
+          # The tag, not the branch. A release is of the code that was tagged, whatever main
+          # has moved on to since.
+          ref: ${{ steps.tag.outputs.tag }}
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v4
+        with:
+          java-version: '21'
+          distribution: 'temurin'
+          cache: maven
+
+      # ---- Everything below this line runs before anything is uploaded --------------------
+
+      - name: Check the tag and the project version agree
+        id: version
+        env:
+          TAG: ${{ steps.tag.outputs.tag }}
+        run: |
+          set -euo pipefail
+          expected="${TAG#v}"
+          actual=$(mvn --batch-mode --no-transfer-progress \
+            help:evaluate -Dexpression=project.version -q -DforceStdout)
+
+          if [ "$expected" != "$actual" ]; then
+            echo "::error::tag ${TAG} means version ${expected}, but the POM says ${actual}."
+            echo "::error::Set the POM version to ${expected}, commit it, and tag that commit."
+            exit 1
+          fi
+
+          case "$actual" in
+            *SNAPSHOT*)
+              echo "::error::${actual} is a snapshot. Maven Central publishes releases only."
+              echo "::error::Set a release version in the POM and tag that commit."
+              exit 1
+              ;;
+          esac
+
+          echo "version=$actual" >> "$GITHUB_OUTPUT"
+          echo "Releasing version $actual"
+
+      - name: Check this version is not already on Maven Central
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          set -euo pipefail
+          url="https://repo1.maven.org/maven2/io/github/saddad-platform/saddad-common/${VERSION}/saddad-common-${VERSION}.pom"
+          status=$(curl -s -o /dev/null -w '%{http_code}' "$url")
+          if [ "$status" = "200" ]; then
+            echo "::error::io.github.saddad-platform:saddad-common:${VERSION} is already published."
+            echo "::error::Published versions are permanent and cannot be replaced. Release a new version instead."
+            exit 1
+          fi
+          echo "Version ${VERSION} is not on Maven Central yet (HTTP ${status}) - safe to publish."
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Check the metadata Maven Central requires is declared here
+        # Deliberately reads this project's own POM, as XML, rather than the effective POM or
+        # the raw text. The effective POM inherits a licence from spring-boot-starter-parent,
+        # so a check against it passes while the artifact goes out under Apache-2.0 because of
+        # a build parent - a licensing decision nobody made. Parsing also means a commented-out
+        # example is not mistaken for a declaration. See .github/scripts/.
+        run: python3 .github/scripts/check_release_metadata.py
+
+      - name: Check the publishing credentials are configured
+        env:
+          CENTRAL_USERNAME: ${{ secrets.CENTRAL_USERNAME }}
+          CENTRAL_PASSWORD: ${{ secrets.CENTRAL_PASSWORD }}
+          GPG_PRIVATE_KEY: ${{ secrets.GPG_PRIVATE_KEY }}
+          GPG_PASSPHRASE: ${{ secrets.GPG_PASSPHRASE }}
+        run: |
+          set -euo pipefail
+          # Presence only. The values are never printed, compared or echoed.
+          missing=0
+          for name in CENTRAL_USERNAME CENTRAL_PASSWORD GPG_PRIVATE_KEY GPG_PASSPHRASE; do
+            if [ -z "${!name:-}" ]; then
+              echo "::error::repository secret ${name} is not set."
+              missing=1
+            fi
+          done
+          if [ "$missing" = "1" ]; then
+            echo "::error::MANUAL CONFIGURATION REQUIRED: see RELEASING.md, 'One-time setup'."
+            exit 1
+          fi
+          echo "All four publishing secrets are present."
+
+      - name: Run the tests
+        # Published unbuilt is published broken, permanently: this library is used by every
+        # service on the platform, so a failure here is six failures later that cannot be
+        # taken back.
+        run: mvn --batch-mode --no-transfer-progress verify
+
+      # ---- Signing and publication --------------------------------------------------------
+
+      - name: Import the signing key and configure Maven
+        uses: actions/setup-java@v4
+        with:
+          java-version: '21'
+          distribution: 'temurin'
+          cache: maven
+          # Writes ~/.m2/settings.xml with a `central` server whose credentials come from the
+          # environment below, and imports the signing key into the runner's keyring. No
+          # settings file with secrets in it is ever committed, and neither value is printed.
+          server-id: central
+          server-username: CENTRAL_USERNAME
+          server-password: CENTRAL_PASSWORD
+          gpg-private-key: ${{ secrets.GPG_PRIVATE_KEY }}
+          gpg-passphrase: GPG_PASSPHRASE
+
+      - name: Build, sign and check the artifacts
+        env:
+          GPG_PASSPHRASE: ${{ secrets.GPG_PASSPHRASE }}
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          set -euo pipefail
+          mvn --batch-mode --no-transfer-progress -Prelease -DskipTests package
+
+          # Assert the full set before uploading. Central rejects an incomplete bundle, and
+          # its rejection is far harder to read than this loop.
+          for suffix in "" "-sources" "-javadoc"; do
+            for ext in "jar" "jar.asc"; do
+              file="target/saddad-common-${VERSION}${suffix}.${ext}"
+              [ -f "$file" ] || { echo "::error::missing ${file}"; exit 1; }
+              echo "found ${file}"
+            done
+          done
+
+      - name: Publish to Maven Central
+        id: publish
+        if: ${{ github.event_name == 'release' || inputs.dry_run == false }}
+        env:
+          CENTRAL_USERNAME: ${{ secrets.CENTRAL_USERNAME }}
+          CENTRAL_PASSWORD: ${{ secrets.CENTRAL_PASSWORD }}
+          GPG_PASSPHRASE: ${{ secrets.GPG_PASSPHRASE }}
+        run: |
+          set -euo pipefail
+          # The plugin waits until Central reports the version as published, so reaching the
+          # next line means it really is available to consumers.
+          mvn --batch-mode --no-transfer-progress -Prelease -DskipTests deploy
+          echo "published=true" >> "$GITHUB_OUTPUT"
+
+      - name: Note that this was a dry run
+        if: ${{ github.event_name != 'release' && inputs.dry_run == true }}
+        # Nothing to record: the publish step's output stays empty, which is what keeps the
+        # consumer job from running. This step exists so the run says so out loud.
+        run: echo "Dry run - every check passed and every artifact was built, nothing published."
+
+      - name: Summary
+        if: always()
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+          PUBLISHED: ${{ steps.publish.outputs.published }}
+        run: |
+          {
+            echo "## Maven Central"
+            echo
+            if [ "${PUBLISHED:-false}" = "true" ]; then
+              echo "Publication: **SUCCESS**"
+            else
+              echo "Publication: **not performed** (dry run, or an earlier step stopped the release)"
+            fi
+            echo
+            echo '```'
+            echo "io.github.saddad-platform:saddad-common:${VERSION:-unknown}"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  # A separate job so that a failure while opening consumer pull requests can never be
+  # mistaken for a failed publication, and so it can be re-run on its own.
+  update-consumers:
+    name: Update consuming services
+    needs: publish
+    if: ${{ needs.publish.outputs.published == 'true' }}
+    uses: ./.github/workflows/update-consumers.yml
+    with:
+      version: ${{ needs.publish.outputs.version }}
+      dry_run: false
+    secrets: inherit

@@ -50,7 +50,12 @@ public class InternalApiKeyFilter extends OncePerRequestFilter {
                 String requestId = RequestContext.currentRequestId();
                 ApiError error = ApiError.of("UNAUTHENTICATED", "A valid internal API key is required for this endpoint", requestId);
                 response.setStatus(HttpServletResponse.SC_UNAUTHORIZED);
+                // Deliberately not translated: the only readers of this are other services,
+                // and an API key failure is an operator's problem, not a customer's. The
+                // charset is still declared, so this stays correct if it ever carries text
+                // that is not plain ASCII.
                 response.setContentType(MediaType.APPLICATION_JSON_VALUE);
+                response.setCharacterEncoding(java.nio.charset.StandardCharsets.UTF_8.name());
                 response.getWriter().write(objectMapper.writeValueAsString(error));
                 return;
             }
