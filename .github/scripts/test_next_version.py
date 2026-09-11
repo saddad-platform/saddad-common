@@ -113,6 +113,12 @@ class TheVersionItself(unittest.TestCase):
     def test_a_breaking_change_after_a_release(self):
         self.assertEqual("2.0.0", next_version("1.4.2", "1.4.2", "feat!: change the envelope"))
 
+    def test_a_pom_hand_edited_with_a_v_is_normalised(self):
+        # Exactly what was in this repository: someone wrote a git tag into a Maven version, and
+        # the first release died on it.
+        self.assertEqual("1.0.1", next_version("", "v1.0.1", "Fix"))
+        self.assertEqual("1.0.1", next_version("", "v1.0.1-SNAPSHOT", "Fix"))
+
     def test_a_nonsense_pom_on_a_first_release_is_refused(self):
         with self.assertRaises(ValueError):
             next_version("", "not-a-version", "Fix")

@@ -90,7 +90,13 @@ def next_version(latest_tag: str, pom_version: str, commits: str) -> str:
     truth and the POM follows it, because the tag is what JitPack serves.
     """
     if not latest_tag.strip():
+        # Normalised rather than trusted. A POM that had been hand-edited to "v1.0.1" - a "v"
+        # is a git tag convention and is not legal in a Maven version - stopped the very first
+        # release of this library dead. The leading "v" and a snapshot suffix are both stripped,
+        # because in both cases what the author meant is obvious and refusing helps nobody.
         version = pom_version.strip().replace("-SNAPSHOT", "")
+        if version[:1] in ("v", "V") and SEMVER.match(version[1:]):
+            version = version[1:]
         if not SEMVER.match(version):
             raise ValueError(f"the POM version {pom_version!r} is not a version number")
         return version
