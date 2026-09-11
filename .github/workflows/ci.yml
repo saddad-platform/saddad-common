@@ -44,13 +44,13 @@ jobs:
       # approximation of it. Tests are skipped here and JitPack skips them too.
       - name: Build the artifacts JitPack will build
         run: >
-          mvn --batch-mode --no-transfer-progress
+          ./mvnw --batch-mode --no-transfer-progress
           -Prelease -DskipTests package
 
       - name: Check all three artifacts exist
         run: |
           set -euo pipefail
-          version=$(mvn --batch-mode --no-transfer-progress \
+          version=$(./mvnw --batch-mode --no-transfer-progress \
             help:evaluate -Dexpression=project.version -q -DforceStdout)
           for suffix in "" "-sources" "-javadoc"; do
             file="target/saddad-common-${version}${suffix}.jar"

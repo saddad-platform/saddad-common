@@ -15,12 +15,12 @@ set -euo pipefail
 cd "$(dirname "$0")"
 
 echo "==> 1/3  Tests"
-mvn --batch-mode --no-transfer-progress verify
+./mvnw --batch-mode --no-transfer-progress verify
 
 echo
 echo "==> 2/3  The artifacts JitPack will build"
-mvn --batch-mode --no-transfer-progress -Prelease -DskipTests package -q
-version=$(mvn --batch-mode --no-transfer-progress help:evaluate -Dexpression=project.version -q -DforceStdout)
+./mvnw --batch-mode --no-transfer-progress -Prelease -DskipTests package -q
+version=$(./mvnw --batch-mode --no-transfer-progress help:evaluate -Dexpression=project.version -q -DforceStdout)
 for suffix in "" "-sources" "-javadoc"; do
   file="target/saddad-common-${version}${suffix}.jar"
   if [ -f "$file" ]; then

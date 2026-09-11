@@ -40,7 +40,7 @@ re-tag, rather than letting six services end up with a `v` in their POMs.
 3. **Set it in the POM and push:**
 
    ```bash
-   mvn versions:set -DnewVersion=1.0.1 -DgenerateBackupPoms=false
+   ./mvnw versions:set -DnewVersion=1.0.1 -DgenerateBackupPoms=false
    git commit -am "chore(release): 1.0.1"
    git push
    ```
@@ -64,7 +64,7 @@ Actions tab → **Release** → **Run workflow**, give it an existing tag and se
 | What happened | What to do |
 |---|---|
 | The workflow failed before JitPack | The tag was never served. Delete the tag and the release, fix, and release again with the same number. |
-| JitPack failed to build | Read `https://jitpack.io/com/github/saddad-platform/saddad-common/<version>/build.log`. Fix, then release a new version: a tag JitPack has already built is cached. |
+| JitPack failed to build | Read `https://jitpack.io/com/github/saddad-platform/saddad-common/<version>/build.log` - it is the actual build output and says exactly what broke. Fix, then release a new version: JitPack caches a result per version, including a failure. |
 | JitPack was still building when the workflow gave up | Nothing is wrong. Check <https://jitpack.io/#saddad-platform/saddad-common>, then run **Update consuming services** by hand with that version. |
 | The pull requests did not appear | Run **Update consuming services** on its own. It is safe to run repeatedly. |
 
@@ -73,10 +73,14 @@ Actions tab → **Release** → **Run workflow**, give it an existing tag and se
 Almost none. JitPack needs nothing configured: the first time anybody requests a version, it
 builds it.
 
-Two files in this repository are the whole configuration:
+Three things in this repository are the whole configuration:
 
-- **`jitpack.yml`** tells JitPack to use JDK 21 and to attach the sources and Javadoc jars.
-  Without the JDK line it builds with an older Java and fails.
+- **`jitpack.yml`** tells JitPack to use JDK 21, to build through the Maven wrapper, and to
+  attach the sources and Javadoc jars.
+- **`mvnw` and `.mvn/`** pin Maven 3.9.16. JitPack's own Maven is older than 3.6.3, which the
+  compiler plugin Spring Boot 3.3 manages refuses to run on, so without the wrapper every
+  JitPack build fails with "The plugin ... requires Maven version 3.6.3" while building fine
+  locally. Keep all three files committed.
 - **`pom.xml`** carries the version, which must match the tag.
 
 ### The one optional thing

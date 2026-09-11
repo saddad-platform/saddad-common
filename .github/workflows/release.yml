@@ -75,7 +75,7 @@ jobs:
           TAG: ${{ steps.tag.outputs.tag }}
         run: |
           set -euo pipefail
-          actual=$(mvn --batch-mode --no-transfer-progress \
+          actual=$(./mvnw --batch-mode --no-transfer-progress \
             help:evaluate -Dexpression=project.version -q -DforceStdout)
 
           # With JitPack the tag *is* the version a consumer writes, so a `v` prefix would put
@@ -114,7 +114,7 @@ jobs:
           VERSION: ${{ steps.version.outputs.version }}
         run: |
           set -euo pipefail
-          mvn --batch-mode --no-transfer-progress -Prelease -DskipTests package
+          ./mvnw --batch-mode --no-transfer-progress -Prelease -DskipTests package
           for suffix in "" "-sources" "-javadoc"; do
             file="target/saddad-common-${VERSION}${suffix}.jar"
             [ -f "$file" ] || { echo "::error::the build did not produce ${file}"; exit 1; }

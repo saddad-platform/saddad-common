@@ -72,16 +72,19 @@ its own scan to include that package, which every service on the platform does w
 ## Building it yourself
 
 ```bash
-mvn verify
+./mvnw verify
 ```
 
-Java 21 and Maven 3.9 or newer. No credentials are required to build or test.
+Java 21 is the only thing you need installed. The Maven wrapper (`./mvnw`) downloads and uses
+Maven 3.9.16, so your build, GitHub's and JitPack's are the same build - which matters here:
+JitPack's own Maven is too old for the compiler plugin Spring Boot 3.3 manages, and the wrapper
+is what makes that a solved problem rather than a recurring one. No credentials are required.
 
 To try a change against a service before it is released, install it locally and the service picks
 it up from there instead of JitPack:
 
 ```bash
-mvn install
+./mvnw install
 ```
 
 ## Releasing

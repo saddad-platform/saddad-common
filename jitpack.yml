@@ -4,19 +4,26 @@
 # whatever ends up in the local repository. There is no upload, no account and no credential
 # anywhere in that sentence, which is the reason this project uses it.
 #
-# Both lines matter:
+# Every line here exists because of something that failed without it:
 #
-#   jdk       JitPack's default JDK is older than this project needs. Without this, the build
-#             fails on JitPack with a version error while working perfectly on your machine.
+#   jdk        JitPack's default JDK is older than this project needs. Without this the build
+#              fails with a class-file version error while working perfectly on your machine.
 #
-#   install   The default is `mvn install -DskipTests`. Adding -Prelease attaches the sources
-#             and Javadoc jars, so a developer using the library can step into its code and read
-#             its documentation in their IDE instead of decompiled bytecode. Tests are skipped
-#             here on purpose: they have already run in the release workflow, which refuses to
-#             tag anything that fails, and running them again would double how long a consumer
-#             waits the first time they ask for a new version.
+#   ./mvnw     JitPack's own Maven is older than 3.6.3, and Spring Boot 3.3.3 manages
+#              maven-compiler-plugin 3.13.0, which refuses to run on anything older:
+#              "The plugin ... requires Maven version 3.6.3". The wrapper pins Maven 3.9.16 for
+#              JitPack, for GitHub and for every developer, so all three build with the same
+#              tool and a failure anywhere is reproducible everywhere.
+#
+#   -Prelease  Attaches the sources and Javadoc jars, so a developer using the library can step
+#              into its code and read its documentation in their IDE instead of decompiled
+#              bytecode.
+#
+#   -DskipTests  The tests have already run on the machine of whoever cut the release, which is
+#              where this platform runs test cases. Running them again here would double how
+#              long a consumer waits the first time they ask for a new version.
 jdk:
   - openjdk21
 
 install:
-  - mvn --batch-mode --no-transfer-progress install -DskipTests -Prelease
+  - ./mvnw --batch-mode --no-transfer-progress install -DskipTests -Prelease
