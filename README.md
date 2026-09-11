@@ -90,8 +90,8 @@ Set the version in `pom.xml`, push, and publish a GitHub Release whose tag is ex
 version. JitPack does the rest, and every service that uses the library gets a pull request
 offering the upgrade. [RELEASING.md](RELEASING.md) has the detail.
 
-Before you push, check everything locally - this costs nothing and nothing runs automatically on
-GitHub:
+The tests run on your machine, not on GitHub Actions. Run them before you push, and always
+before you tag a release:
 
 ```bash
 ./verify.sh

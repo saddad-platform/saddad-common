@@ -4,7 +4,8 @@
 # first time anybody asks for a version it clones that tag, builds it and serves the result. So a
 # release here is really three things:
 #
-#   1. make sure the tag and the POM say the same version, and that it builds and passes;
+#   1. make sure the tag and the POM say the same version, and that the tag builds cleanly
+#      (tests are not run here - ./verify.sh runs them on your machine before you tag);
 #   2. ask JitPack to build it now and wait for the answer, so a broken build is found by the
 #      person who caused it rather than by the next developer who needs the version;
 #   3. open a pull request on every service that uses the library.
@@ -104,15 +105,15 @@ jobs:
           echo "version=$actual" >> "$GITHUB_OUTPUT"
           echo "Releasing ${actual}"
 
-      - name: Build and test exactly as JitPack will
-        # JitPack skips the tests to keep a consumer's first request fast, so this is the run
-        # that decides whether the tag is any good. A tag that fails here can be deleted and
-        # replaced, which is easy: nothing has been served yet.
+      - name: Build exactly what JitPack will build
+        # The same command JitPack runs, so a tag that builds here builds there. Tests are not
+        # run on Actions on this platform: run ./verify.sh before you tag, which RELEASING.md
+        # makes step one for exactly this reason. What this proves is that the tag compiles and
+        # produces all three jars from a clean checkout.
         env:
           VERSION: ${{ steps.version.outputs.version }}
         run: |
           set -euo pipefail
-          mvn --batch-mode --no-transfer-progress verify
           mvn --batch-mode --no-transfer-progress -Prelease -DskipTests package
           for suffix in "" "-sources" "-javadoc"; do
             file="target/saddad-common-${VERSION}${suffix}.jar"

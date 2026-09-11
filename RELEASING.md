@@ -22,8 +22,8 @@ re-tag, rather than letting six services end up with a `v` in their POMs.
 
 ## Releasing, step by step
 
-1. **Check it locally.** Nothing runs automatically on GitHub, so this is the check that `main`
-   is sound:
+1. **Check it locally. This is the only place the tests run.** Test cases are not run on GitHub
+   Actions on this platform, so nothing else will catch a failure for you:
 
    ```bash
    ./verify.sh
@@ -47,9 +47,9 @@ re-tag, rather than letting six services end up with a `v` in their POMs.
 
 4. **Publish a GitHub Release** on that commit, tagged exactly `1.0.1`.
 
-5. **Watch the Release workflow.** It checks the tag and the POM agree, runs the tests, builds
-   what JitPack will build, asks JitPack to build it now and waits for the answer, then opens a
-   pull request on every service that uses the library.
+5. **Watch the Release workflow.** It checks the tag and the POM agree, builds what JitPack will
+   build, asks JitPack to build it now and waits for the answer, then opens a pull request on
+   every service that uses the library. It does not run the tests - step 1 did that.
 
 6. **Review those pull requests.** One per service, each changing one line. Merging one does not
    release that service; that stays the service owner's decision.
@@ -115,6 +115,7 @@ assumption is "nothing". Add a `LICENSE` file and uncomment the `<licenses>` blo
 | Merge a consumer pull request | **No** |
 | Release or deploy a service | **No** |
 | Run anything automatically on a push | **No** |
+| Run test cases on GitHub Actions | **No** - `./verify.sh` runs them on your machine |
 
 ## Consumer discovery
 

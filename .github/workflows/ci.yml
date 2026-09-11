@@ -1,38 +1,30 @@
-# Builds and tests saddad-common on every change.
+# Builds saddad-common. Started by hand only.
 #
-# This is the verification half of what the old `publish.yml` did. That workflow ran the tests
-# and then deployed to GitHub Packages on every push to main, which meant a normal commit
-# produced a publication - the thing a release process exists to stop. Testing on every change
-# is worth keeping; publishing on every change is not, so the two have been separated and
-# publication now happens only from `release.yml`, only from a GitHub Release.
-name: CI
+# Two deliberate absences:
+#
+#   1. No automatic trigger. Nothing here runs on a push or a pull request.
+#   2. No tests. Test cases are not run on GitHub Actions on this platform - they run on your
+#      machine, through ./verify.sh, which is faster to read and costs nothing.
+#
+# What is left is worth a button: it proves the project still compiles and still produces the
+# three jars JitPack will serve, from a clean checkout on a machine that is not yours. That
+# catches the things a local build hides - a file never committed, a dependency only in your
+# own ~/.m2, a JDK difference.
+name: Build
 
-# Started by hand only.
-#
-# This repository is public, so its Actions minutes are free and unlimited - but the owner asked
-# for nothing to run automatically, and the same checks run locally in under a minute with
-# `./verify.sh`. To have every push checked again, add back:
-#
-#   push:
-#     branches: [main]
-#   pull_request:
-#     branches: [main]
 on:
   workflow_dispatch:
 
-# This workflow reads the repository and nothing else. Saying so means a compromised action
-# cannot do anything else.
 permissions:
   contents: read
 
 concurrency:
-  # One run at a time. Nothing here is published, so an outdated run is cancelled.
-  group: ci-${{ github.ref }}
+  group: build-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
-  verify:
-    name: Build and test
+  build:
+    name: Build
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
@@ -44,30 +36,14 @@ jobs:
           distribution: 'temurin'
           cache: maven
 
-      # `verify`, not `test`: it runs the tests and then packages the jar, so a change that
-      # compiles and passes but cannot be assembled is caught here rather than during a
-      # release, when the person waiting is doing something time-sensitive.
-      - name: Build and test
-        run: mvn --batch-mode --no-transfer-progress verify
-
-      # The same command JitPack will run. Javadoc has its own ways of failing, so building it
-      # here means a release is never the first time anybody finds out.
+      # The same command JitPack runs, so this is a rehearsal of the real thing rather than an
+      # approximation of it. Tests are skipped here and JitPack skips them too.
       - name: Build the artifacts JitPack will build
         run: >
           mvn --batch-mode --no-transfer-progress
           -Prelease -DskipTests package
 
-      - name: Set up Python
-        uses: actions/setup-python@v6
-        with:
-          python-version: '3.12'
-
-      # The release automation edits other people's repositories, so the logic that decides
-      # what to edit is tested on every change to it rather than the first time it runs.
-      - name: Test the release scripts
-        run: python3 .github/scripts/test_update_consumers.py
-
-      - name: Check the release artifacts exist
+      - name: Check all three artifacts exist
         run: |
           set -euo pipefail
           version=$(mvn --batch-mode --no-transfer-progress \
@@ -75,7 +51,7 @@ jobs:
           for suffix in "" "-sources" "-javadoc"; do
             file="target/saddad-common-${version}${suffix}.jar"
             if [ ! -f "$file" ]; then
-              echo "::error::the release build did not produce ${file}"
+              echo "::error::the build did not produce ${file}"
               exit 1
             fi
             echo "found ${file}"
