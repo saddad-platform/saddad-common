@@ -1,8 +1,7 @@
 #!/usr/bin/env python3
 """Open a dependency-update pull request on every service that uses saddad-common.
 
-Run by `.github/workflows/update-consumers.yml` after a version has actually been published to
-Maven Central.
+Run by `.github/workflows/update-consumers.yml` once JitPack has confirmed it built the tag.
 
 What it does, and the reasoning behind each rule:
 
@@ -22,8 +21,8 @@ What it does, and the reasoning behind each rule:
   pull request it opened last time and leaves them alone, rather than opening a second one.
 
 * **One consumer's failure is that consumer's failure.** A repository that cannot be reached is
-  reported and the rest continue: the library has already been published, and nothing about an
-  unreachable service makes that untrue.
+  reported and the rest continue: the version already exists, and nothing about an unreachable
+  service makes that untrue.
 
 Nothing here logs the token, and no output contains a credential.
 """
@@ -42,7 +41,7 @@ from typing import Any
 
 API = "https://api.github.com"
 ARTIFACT_ID = "saddad-common"
-GROUP_ID = "io.github.saddad-platform"
+GROUP_ID = "com.github.saddad-platform"
 
 # The branch a pull request is opened from. Version-specific, which is what makes a second run
 # for the same version find the first run's work instead of duplicating it.
@@ -283,8 +282,9 @@ def update_consumer(github: GitHub, repository: str, version: str, release_url: 
         # Flagged, never rewritten: moving a service to different coordinates is a change of
         # where its dependency comes from, which is a decision, not a version bump.
         notes.append(
-            f"This service declares the library under `{group}`, but it is published as "
-            f"`{GROUP_ID}`. The group id has been left alone - update it deliberately."
+            f"This service declares the library under `{group}`, but JitPack serves it as "
+            f"`{GROUP_ID}`. The group id has been left alone - changing where a dependency "
+            f"comes from is a decision, not a version bump."
         )
     if is_major_upgrade(change.previous_version, version):
         notes.append(

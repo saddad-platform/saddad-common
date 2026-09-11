@@ -7,11 +7,17 @@
 # publication now happens only from `release.yml`, only from a GitHub Release.
 name: CI
 
+# Started by hand only.
+#
+# This repository is public, so its Actions minutes are free and unlimited - but the owner asked
+# for nothing to run automatically, and the same checks run locally in under a minute with
+# `./verify.sh`. To have every push checked again, add back:
+#
+#   push:
+#     branches: [main]
+#   pull_request:
+#     branches: [main]
 on:
-  push:
-    branches: [main]
-  pull_request:
-    branches: [main]
   workflow_dispatch:
 
 # This workflow reads the repository and nothing else. Saying so means a compromised action
@@ -20,8 +26,7 @@ permissions:
   contents: read
 
 concurrency:
-  # One run per branch: a second push supersedes the first, and cancelling the outdated run
-  # costs nothing because nothing here is published.
+  # One run at a time. Nothing here is published, so an outdated run is cancelled.
   group: ci-${{ github.ref }}
   cancel-in-progress: true
 
@@ -30,10 +35,10 @@ jobs:
     name: Build and test
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Set up JDK 21
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@v5
         with:
           java-version: '21'
           distribution: 'temurin'
@@ -45,34 +50,22 @@ jobs:
       - name: Build and test
         run: mvn --batch-mode --no-transfer-progress verify
 
-      # The release build produces two more artifacts than an ordinary one, and both have
-      # their own ways of failing - Javadoc on a malformed tag, the source plugin on an
-      # unreadable file. Building them here, unsigned, means a release is never the first time
-      # anybody finds out. Signing and publishing are deliberately not exercised: they need
-      # secrets, and CI runs on pull requests from anywhere.
-      - name: Build the release artifacts, unsigned
+      # The same command JitPack will run. Javadoc has its own ways of failing, so building it
+      # here means a release is never the first time anybody finds out.
+      - name: Build the artifacts JitPack will build
         run: >
           mvn --batch-mode --no-transfer-progress
-          -Prelease -Dgpg.skip=true -DskipTests package
+          -Prelease -DskipTests package
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v6
         with:
           python-version: '3.12'
 
       # The release automation edits other people's repositories, so the logic that decides
       # what to edit is tested on every change to it rather than the first time it runs.
       - name: Test the release scripts
-        run: |
-          python3 .github/scripts/test_update_consumers.py
-          python3 .github/scripts/test_check_release_metadata.py
-
-      # A warning rather than a failure. This is the check that will stop the next release
-      # while the licence is undecided, and saying so on every build is useful; failing every
-      # build over a known, documented gap would only teach people to ignore a red tick.
-      - name: Report on release readiness
-        continue-on-error: true
-        run: python3 .github/scripts/check_release_metadata.py
+        run: python3 .github/scripts/test_update_consumers.py
 
       - name: Check the release artifacts exist
         run: |

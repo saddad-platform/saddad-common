@@ -1,29 +1,29 @@
-# Publishes saddad-common to Maven Central, and only ever from a GitHub Release.
+# Releases saddad-common through JitPack.
 #
-# The rule this workflow exists to enforce: a published Maven Central version is permanent and
-# cannot be replaced. Everything before the upload step is therefore a check that the thing
-# about to become permanent is the thing the maintainer meant - the tag and the POM agree, the
-# version is not a snapshot, that version is not already on Central, the licence metadata
-# Central requires is present, the tests pass, and every artifact and signature was produced.
-# Any one of them failing stops the run before a single byte is uploaded.
+# There is nothing to upload and no credential to hold. JitPack watches the repository, and the
+# first time anybody asks for a version it clones that tag, builds it and serves the result. So a
+# release here is really three things:
 #
-# See RELEASING.md for the maintainer's side of this, and for the one-time account setup it
-# assumes.
+#   1. make sure the tag and the POM say the same version, and that it builds and passes;
+#   2. ask JitPack to build it now and wait for the answer, so a broken build is found by the
+#      person who caused it rather than by the next developer who needs the version;
+#   3. open a pull request on every service that uses the library.
+#
+# See RELEASING.md.
 name: Release
 
 on:
   release:
     types: [published]
-  # Re-runnable by hand for the case where publication succeeded and something after it did
-  # not, and for rehearsing the whole thing with `dry_run`.
+  # Re-runnable by hand, and rehearsable with dry_run.
   workflow_dispatch:
     inputs:
       tag:
-        description: 'Existing release tag to publish, for example v1.0.1'
+        description: 'Existing tag to release, for example 1.0.1'
         required: true
         type: string
       dry_run:
-        description: 'Run every check and build every artifact, but publish nothing'
+        description: 'Check and build everything, but do not ask JitPack or open pull requests'
         required: false
         default: false
         type: boolean
@@ -32,18 +32,16 @@ permissions:
   contents: read
 
 concurrency:
-  # Never two publications at once. Unlike CI this must not cancel a run in progress: a
-  # cancelled upload can leave a half-uploaded bundle in the portal.
-  group: release-maven-central
+  group: release-${{ github.ref }}
   cancel-in-progress: false
 
 jobs:
-  publish:
-    name: Publish to Maven Central
+  release:
+    name: Verify and publish
     runs-on: ubuntu-latest
     outputs:
       version: ${{ steps.version.outputs.version }}
-      published: ${{ steps.publish.outputs.published }}
+      published: ${{ steps.jitpack.outputs.published }}
     steps:
       - name: Work out which tag is being released
         id: tag
@@ -54,192 +52,151 @@ jobs:
           set -euo pipefail
           tag="${EVENT_TAG:-$INPUT_TAG}"
           if [ -z "$tag" ]; then
-            echo "::error::no tag to release - this workflow runs on a published release or with a tag input"
+            echo "::error::no tag to release - this runs on a published release or with a tag input"
             exit 1
           fi
           echo "tag=$tag" >> "$GITHUB_OUTPUT"
-          echo "Releasing tag $tag"
 
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
-          # The tag, not the branch. A release is of the code that was tagged, whatever main
-          # has moved on to since.
           ref: ${{ steps.tag.outputs.tag }}
 
       - name: Set up JDK 21
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@v5
         with:
           java-version: '21'
           distribution: 'temurin'
           cache: maven
 
-      # ---- Everything below this line runs before anything is uploaded --------------------
-
-      - name: Check the tag and the project version agree
+      - name: Check the tag and the project version are the same text
         id: version
         env:
           TAG: ${{ steps.tag.outputs.tag }}
         run: |
           set -euo pipefail
-          expected="${TAG#v}"
           actual=$(mvn --batch-mode --no-transfer-progress \
             help:evaluate -Dexpression=project.version -q -DforceStdout)
 
-          if [ "$expected" != "$actual" ]; then
-            echo "::error::tag ${TAG} means version ${expected}, but the POM says ${actual}."
-            echo "::error::Set the POM version to ${expected}, commit it, and tag that commit."
+          # With JitPack the tag *is* the version a consumer writes, so a `v` prefix would put
+          # <version>v1.0.1</version> into six service POMs. One convention: plain versions.
+          case "$TAG" in
+            v*)
+              echo "::error::tag ${TAG} starts with 'v'. On JitPack the tag becomes the version"
+              echo "::error::consumers write, so tag it ${TAG#v} instead and release that."
+              exit 1
+              ;;
+          esac
+
+          if [ "$TAG" != "$actual" ]; then
+            echo "::error::tag ${TAG} and the POM version ${actual} disagree."
+            echo "::error::JitPack builds the tag, so what consumers get would not be what the"
+            echo "::error::POM says. Set the POM to ${TAG}, commit, and tag that commit."
             exit 1
           fi
 
           case "$actual" in
             *SNAPSHOT*)
-              echo "::error::${actual} is a snapshot. Maven Central publishes releases only."
-              echo "::error::Set a release version in the POM and tag that commit."
+              echo "::error::${actual} is a snapshot. Release a fixed version."
               exit 1
               ;;
           esac
 
           echo "version=$actual" >> "$GITHUB_OUTPUT"
-          echo "Releasing version $actual"
+          echo "Releasing ${actual}"
 
-      - name: Check this version is not already on Maven Central
+      - name: Build and test exactly as JitPack will
+        # JitPack skips the tests to keep a consumer's first request fast, so this is the run
+        # that decides whether the tag is any good. A tag that fails here can be deleted and
+        # replaced, which is easy: nothing has been served yet.
         env:
           VERSION: ${{ steps.version.outputs.version }}
         run: |
           set -euo pipefail
-          url="https://repo1.maven.org/maven2/io/github/saddad-platform/saddad-common/${VERSION}/saddad-common-${VERSION}.pom"
-          status=$(curl -s -o /dev/null -w '%{http_code}' "$url")
-          if [ "$status" = "200" ]; then
-            echo "::error::io.github.saddad-platform:saddad-common:${VERSION} is already published."
-            echo "::error::Published versions are permanent and cannot be replaced. Release a new version instead."
-            exit 1
-          fi
-          echo "Version ${VERSION} is not on Maven Central yet (HTTP ${status}) - safe to publish."
-
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.12'
-
-      - name: Check the metadata Maven Central requires is declared here
-        # Deliberately reads this project's own POM, as XML, rather than the effective POM or
-        # the raw text. The effective POM inherits a licence from spring-boot-starter-parent,
-        # so a check against it passes while the artifact goes out under Apache-2.0 because of
-        # a build parent - a licensing decision nobody made. Parsing also means a commented-out
-        # example is not mistaken for a declaration. See .github/scripts/.
-        run: python3 .github/scripts/check_release_metadata.py
-
-      - name: Check the publishing credentials are configured
-        env:
-          CENTRAL_USERNAME: ${{ secrets.CENTRAL_USERNAME }}
-          CENTRAL_PASSWORD: ${{ secrets.CENTRAL_PASSWORD }}
-          GPG_PRIVATE_KEY: ${{ secrets.GPG_PRIVATE_KEY }}
-          GPG_PASSPHRASE: ${{ secrets.GPG_PASSPHRASE }}
-        run: |
-          set -euo pipefail
-          # Presence only. The values are never printed, compared or echoed.
-          missing=0
-          for name in CENTRAL_USERNAME CENTRAL_PASSWORD GPG_PRIVATE_KEY GPG_PASSPHRASE; do
-            if [ -z "${!name:-}" ]; then
-              echo "::error::repository secret ${name} is not set."
-              missing=1
-            fi
-          done
-          if [ "$missing" = "1" ]; then
-            echo "::error::MANUAL CONFIGURATION REQUIRED: see RELEASING.md, 'One-time setup'."
-            exit 1
-          fi
-          echo "All four publishing secrets are present."
-
-      - name: Run the tests
-        # Published unbuilt is published broken, permanently: this library is used by every
-        # service on the platform, so a failure here is six failures later that cannot be
-        # taken back.
-        run: mvn --batch-mode --no-transfer-progress verify
-
-      # ---- Signing and publication --------------------------------------------------------
-
-      - name: Import the signing key and configure Maven
-        uses: actions/setup-java@v4
-        with:
-          java-version: '21'
-          distribution: 'temurin'
-          cache: maven
-          # Writes ~/.m2/settings.xml with a `central` server whose credentials come from the
-          # environment below, and imports the signing key into the runner's keyring. No
-          # settings file with secrets in it is ever committed, and neither value is printed.
-          server-id: central
-          server-username: CENTRAL_USERNAME
-          server-password: CENTRAL_PASSWORD
-          gpg-private-key: ${{ secrets.GPG_PRIVATE_KEY }}
-          gpg-passphrase: GPG_PASSPHRASE
-
-      - name: Build, sign and check the artifacts
-        env:
-          GPG_PASSPHRASE: ${{ secrets.GPG_PASSPHRASE }}
-          VERSION: ${{ steps.version.outputs.version }}
-        run: |
-          set -euo pipefail
+          mvn --batch-mode --no-transfer-progress verify
           mvn --batch-mode --no-transfer-progress -Prelease -DskipTests package
-
-          # Assert the full set before uploading. Central rejects an incomplete bundle, and
-          # its rejection is far harder to read than this loop.
           for suffix in "" "-sources" "-javadoc"; do
-            for ext in "jar" "jar.asc"; do
-              file="target/saddad-common-${VERSION}${suffix}.${ext}"
-              [ -f "$file" ] || { echo "::error::missing ${file}"; exit 1; }
-              echo "found ${file}"
-            done
+            file="target/saddad-common-${VERSION}${suffix}.jar"
+            [ -f "$file" ] || { echo "::error::the build did not produce ${file}"; exit 1; }
+            echo "built ${file}"
           done
 
-      - name: Publish to Maven Central
-        id: publish
+      - name: Ask JitPack to build it, and wait for the answer
+        id: jitpack
         if: ${{ github.event_name == 'release' || inputs.dry_run == false }}
         env:
-          CENTRAL_USERNAME: ${{ secrets.CENTRAL_USERNAME }}
-          CENTRAL_PASSWORD: ${{ secrets.CENTRAL_PASSWORD }}
-          GPG_PASSPHRASE: ${{ secrets.GPG_PASSPHRASE }}
+          VERSION: ${{ steps.version.outputs.version }}
+          OWNER: ${{ github.repository_owner }}
         run: |
           set -euo pipefail
-          # The plugin waits until Central reports the version as published, so reaching the
-          # next line means it really is available to consumers.
-          mvn --batch-mode --no-transfer-progress -Prelease -DskipTests deploy
-          echo "published=true" >> "$GITHUB_OUTPUT"
+          base="https://jitpack.io/com/github/${OWNER}/saddad-common/${VERSION}"
 
-      - name: Note that this was a dry run
-        if: ${{ github.event_name != 'release' && inputs.dry_run == true }}
-        # Nothing to record: the publish step's output stays empty, which is what keeps the
-        # consumer job from running. This step exists so the run says so out loud.
-        run: echo "Dry run - every check passed and every artifact was built, nothing published."
+          # Requesting the POM is what makes JitPack start building; the API then reports how it
+          # went.
+          echo "Asking JitPack for com.github.${OWNER}:saddad-common:${VERSION}"
+          curl -s -o /dev/null "${base}/saddad-common-${VERSION}.pom" || true
+
+          for attempt in $(seq 1 40); do
+            status=$(curl -s "https://jitpack.io/api/builds/com.github.${OWNER}/saddad-common/${VERSION}" \
+              | python3 -c "import sys,json; print(json.load(sys.stdin).get('status',''))" 2>/dev/null || echo "")
+            case "$status" in
+              ok)
+                echo "JitPack built ${VERSION} successfully."
+                echo "published=true" >> "$GITHUB_OUTPUT"
+                exit 0
+                ;;
+              Error|error)
+                echo "::error::JitPack failed to build ${VERSION}."
+                echo "::error::The log says why: ${base}/build.log"
+                exit 1
+                ;;
+              *)
+                echo "  attempt ${attempt}/40: JitPack says '${status:-building}'"
+                sleep 15
+                ;;
+            esac
+          done
+
+          # Not a failed release: the tag is fine and JitPack will finish on its own.
+          echo "::warning::JitPack was still building after ten minutes."
+          echo "::warning::Check https://jitpack.io/#${OWNER}/saddad-common, then run"
+          echo "::warning::'Update consuming services' by hand for ${VERSION}."
+          echo "published=false" >> "$GITHUB_OUTPUT"
 
       - name: Summary
         if: always()
         env:
           VERSION: ${{ steps.version.outputs.version }}
-          PUBLISHED: ${{ steps.publish.outputs.published }}
+          PUBLISHED: ${{ steps.jitpack.outputs.published }}
+          OWNER: ${{ github.repository_owner }}
         run: |
           {
-            echo "## Maven Central"
+            echo "## Release"
             echo
             if [ "${PUBLISHED:-false}" = "true" ]; then
-              echo "Publication: **SUCCESS**"
+              echo "JitPack build: **SUCCESS** - the version is available now."
             else
-              echo "Publication: **not performed** (dry run, or an earlier step stopped the release)"
+              echo "JitPack build: **not confirmed** (dry run, still building, or stopped earlier)."
             fi
             echo
-            echo '```'
-            echo "io.github.saddad-platform:saddad-common:${VERSION:-unknown}"
+            echo "Consumers use:"
+            echo
+            echo '```xml'
+            echo "<dependency>"
+            echo "    <groupId>com.github.${OWNER}</groupId>"
+            echo "    <artifactId>saddad-common</artifactId>"
+            echo "    <version>${VERSION:-unknown}</version>"
+            echo "</dependency>"
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
 
-  # A separate job so that a failure while opening consumer pull requests can never be
-  # mistaken for a failed publication, and so it can be re-run on its own.
+  # Separate, so a problem opening pull requests is never mistaken for a problem with the
+  # release, and so it can be re-run on its own.
   update-consumers:
     name: Update consuming services
-    needs: publish
-    if: ${{ needs.publish.outputs.published == 'true' }}
+    needs: release
+    if: ${{ needs.release.outputs.published == 'true' }}
     uses: ./.github/workflows/update-consumers.yml
     with:
-      version: ${{ needs.publish.outputs.version }}
+      version: ${{ needs.release.outputs.version }}
       dry_run: false
     secrets: inherit

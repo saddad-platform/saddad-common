@@ -12,23 +12,22 @@
     </parent>
 
     <!--
-        Public Maven Central coordinates.
+        JitPack coordinates.
 
-        The group id is the `io.github.<organisation>` namespace that Maven Central grants on
-        proof of ownership of the GitHub organisation of the same name - which is why it is
-        this rather than the internal `com.sadad`: a namespace can only be published under by
-        whoever can prove they own it, and nobody can prove ownership of `com.sadad` without
-        the sadad.com domain. See RELEASING.md for the one-time verification step.
+        The group id is not a choice: JitPack serves every GitHub repository as
+        `com.github.<owner>`, with the repository name as the artifact id and the git tag as the
+        version. Nothing is uploaded anywhere - JitPack clones the tag, builds it, and serves
+        what the build produced. See RELEASING.md.
     -->
-    <groupId>io.github.saddad-platform</groupId>
+    <groupId>com.github.saddad-platform</groupId>
     <artifactId>saddad-common</artifactId>
     <!--
-        The released version, not a SNAPSHOT.
+        The released version, and the name of the git tag that produces it.
 
-        A release is cut by setting this to the version being released, committing it, and
-        publishing a GitHub Release tagged `v<version>`. The workflow refuses to publish if the
-        tag and this number disagree, or if this is a SNAPSHOT, so the artifact that reaches
-        Maven Central can only ever be the one the tag names. See RELEASING.md.
+        With JitPack the git tag *is* the version a consumer writes, so the two must be the same
+        text: tag `1.0.1` and this says `1.0.1`. Tags carry no `v` prefix here for that reason -
+        a `v1.0.1` tag would make every service's POM read `<version>v1.0.1</version>`. The
+        release workflow checks the two agree and refuses to go on if they do not.
     -->
     <version>1.0.0</version>
     <packaging>jar</packaging>
@@ -44,17 +43,14 @@
     </organization>
 
     <!--
-        MANUAL CONFIGURATION REQUIRED - the licence.
+        The licence.
 
-        Maven Central rejects a POM with no <licenses> block, and this repository contains no
-        LICENSE file, no licence headers and no statement of licensing anywhere: there is
-        nothing here to read the project's licensing intent from. Choosing one is the owner's
-        decision and not a detail to be guessed at by tooling, so it is deliberately left
-        undone rather than filled in with a plausible default.
+        JitPack does not require one - it builds and serves whatever the tag contains - so this
+        no longer blocks a release the way Maven Central did. It is still worth declaring:
+        without it, anyone reading the repository has no idea what they are permitted to do with
+        the code, and the safe assumption is "nothing".
 
-        To complete it: add a LICENSE file to the repository root and uncomment the matching
-        block below. The release workflow checks for both and stops with this same explanation
-        before anything is signed or uploaded.
+        To declare one, add a LICENSE file to the repository root and uncomment this:
 
         <licenses>
             <license>
@@ -100,13 +96,10 @@
         <project.reporting.outputEncoding>UTF-8</project.reporting.outputEncoding>
         <jjwt.version>0.12.6</jjwt.version>
 
-        <!-- Pinned rather than inherited or left to resolve. A release is reproducible only
-             if the tools that build it are the same ones next time; a plugin that drifts
-             turns a signing or Javadoc failure into a mystery nobody can reproduce. -->
+        <!-- Pinned rather than left to resolve, so a build on JitPack's machine uses the same
+             tools as a build on yours and a Javadoc failure is reproducible locally. -->
         <maven-source-plugin.version>3.3.1</maven-source-plugin.version>
         <maven-javadoc-plugin.version>3.11.2</maven-javadoc-plugin.version>
-        <maven-gpg-plugin.version>3.2.8</maven-gpg-plugin.version>
-        <central-publishing-plugin.version>0.11.0</central-publishing-plugin.version>
     </properties>
 
     <dependencies>
@@ -189,24 +182,20 @@
     </dependencies>
 
     <!--
-        How a release reaches Maven Central.
+        Sources and Javadoc, for the people who use this library.
 
-        Kept in a profile rather than in the default build, because everything in it is for
-        publishing and none of it is for developing: a contributor running `mvn verify` should
-        not need a GPG key, and should not pay for Javadoc generation on every build. The
-        release workflow is the only thing that passes `-Prelease`.
+        In a profile rather than the default build because Javadoc generation is the slowest
+        part of the build and nobody developing needs it: `mvn verify` stays fast, and the two
+        places that do want them - JitPack, via jitpack.yml, and verify.sh - ask for them.
 
-        This replaces publishing to GitHub Packages. GitHub Packages requires a token for every
-        read - including a public package inside your own organisation - so every consumer,
-        human or machine, had to be issued a credential before it could resolve one dependency.
-        Maven Central requires none, which is the entire point of the move.
+        There is nothing else here any more. Publishing to Maven Central needed signing keys, a
+        verified namespace, an account token and a staging plugin; JitPack needs a git tag.
     -->
     <profiles>
         <profile>
             <id>release</id>
             <build>
                 <plugins>
-                    <!-- Required by Maven Central: the sources that produced the jar. -->
                     <plugin>
                         <groupId>org.apache.maven.plugins</groupId>
                         <artifactId>maven-source-plugin</artifactId>
@@ -219,7 +208,6 @@
                         </executions>
                     </plugin>
 
-                    <!-- Required by Maven Central: the API documentation. -->
                     <plugin>
                         <groupId>org.apache.maven.plugins</groupId>
                         <artifactId>maven-javadoc-plugin</artifactId>
@@ -232,70 +220,16 @@
                         </executions>
                         <configuration>
                             <!--
-                                Doclint off, deliberately and narrowly.
-
-                                This library's Javadoc is prose explaining why the code is the
-                                way it is rather than a tag-complete API reference, and doclint
-                                fails a build on a missing @param in a private helper. The
-                                choice is between a release that cannot be cut and
-                                documentation generated as written; rewriting sixty files of
-                                comments to satisfy a linter is not a publishing change.
-                                Genuine errors still fail the build - see failOnError.
+                                Doclint off, deliberately and narrowly. This library's Javadoc is
+                                prose explaining why the code is the way it is rather than a
+                                tag-complete API reference, and doclint fails a build on a
+                                missing @param in a private helper. Genuine errors still fail -
+                                see failOnError.
                             -->
                             <doclint>none</doclint>
                             <quiet>true</quiet>
                             <notimestamp>true</notimestamp>
                             <failOnError>true</failOnError>
-                        </configuration>
-                    </plugin>
-
-                    <!--
-                        Required by Maven Central: a detached signature for every artifact.
-
-                        The key and its passphrase arrive as environment variables from GitHub
-                        Actions secrets and are never written into the repository.
-                        The loopback pinentry argument below is what lets gpg take a
-                        passphrase from the batch environment instead of trying to open a
-                        prompt on a machine that has no terminal.
-                    -->
-                    <plugin>
-                        <groupId>org.apache.maven.plugins</groupId>
-                        <artifactId>maven-gpg-plugin</artifactId>
-                        <version>${maven-gpg-plugin.version}</version>
-                        <executions>
-                            <execution>
-                                <id>sign-artifacts</id>
-                                <phase>verify</phase>
-                                <goals><goal>sign</goal></goals>
-                                <configuration>
-                                    <gpgArguments>
-                                        <arg>--pinentry-mode</arg>
-                                        <arg>loopback</arg>
-                                    </gpgArguments>
-                                </configuration>
-                            </execution>
-                        </executions>
-                    </plugin>
-
-                    <!--
-                        The current Sonatype Central Portal publisher, not the retired OSSRH
-                        staging API. `extensions` makes it this project's deployment mechanism,
-                        so `mvn deploy` uploads the bundle to the portal.
-
-                        autoPublish releases it without somebody pressing a button in the
-                        portal, and waitUntil=published means the Maven run does not report
-                        success until Maven Central has actually published the version - so the
-                        workflow's "SUCCESS" and the state of the world agree.
-                    -->
-                    <plugin>
-                        <groupId>org.sonatype.central</groupId>
-                        <artifactId>central-publishing-maven-plugin</artifactId>
-                        <version>${central-publishing-plugin.version}</version>
-                        <extensions>true</extensions>
-                        <configuration>
-                            <publishingServerId>central</publishingServerId>
-                            <autoPublish>true</autoPublish>
-                            <waitUntil>published</waitUntil>
                         </configuration>
                     </plugin>
                 </plugins>

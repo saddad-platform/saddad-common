@@ -1,6 +1,6 @@
 # Opens a dependency-update pull request on every service that uses saddad-common.
 #
-# Called by `release.yml` once a version really is on Maven Central, and runnable on its own
+# Called by `release.yml` once JitPack has confirmed it built the tag, and runnable on its own
 # from the Actions tab - which matters, because a consumer being briefly unreachable must not
 # mean the whole thing has to be released again. Running it twice for the same version is
 # safe: it reuses the branch and the pull request it already opened.
@@ -25,7 +25,7 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: 'The saddad-common version consumers should move to, for example 1.0.1'
+        description: 'The released tag consumers should move to, for example 1.0.1'
         required: true
         type: string
       dry_run:
@@ -50,7 +50,7 @@ jobs:
     name: Open dependency pull requests
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       # Preferred: a GitHub App installed on the consuming repositories with only Contents and
       # Pull requests write. Its token is minted for this run and expires with it, and it is
@@ -59,7 +59,7 @@ jobs:
       - name: Mint a token from the GitHub App
         id: app-token
         if: ${{ vars.CONSUMER_APP_ID != '' }}
-        uses: actions/create-github-app-token@v1
+        uses: actions/create-github-app-token@v2
         with:
           app-id: ${{ vars.CONSUMER_APP_ID }}
           private-key: ${{ secrets.CONSUMER_APP_PRIVATE_KEY }}
@@ -88,7 +88,7 @@ jobs:
           fi
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v6
         with:
           python-version: '3.12'
 
@@ -108,5 +108,5 @@ jobs:
           RELEASE_URL: https://github.com/${{ github.repository }}/releases/tag/v${{ inputs.version }}
           CREDENTIAL_SOURCE: ${{ steps.credential.outputs.source }}
         # The script reports per-consumer failures and exits 0: one unreachable repository is
-        # not a reason to call a successful Maven Central publication a failure.
+        # not a reason to call a successful release a failure.
         run: python3 .github/scripts/update_consumers.py

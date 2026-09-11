@@ -1,0 +1,22 @@
+# How JitPack builds this library.
+#
+# JitPack clones the tag you release, runs the command below on its own machine, and serves
+# whatever ends up in the local repository. There is no upload, no account and no credential
+# anywhere in that sentence, which is the reason this project uses it.
+#
+# Both lines matter:
+#
+#   jdk       JitPack's default JDK is older than this project needs. Without this, the build
+#             fails on JitPack with a version error while working perfectly on your machine.
+#
+#   install   The default is `mvn install -DskipTests`. Adding -Prelease attaches the sources
+#             and Javadoc jars, so a developer using the library can step into its code and read
+#             its documentation in their IDE instead of decompiled bytecode. Tests are skipped
+#             here on purpose: they have already run in the release workflow, which refuses to
+#             tag anything that fails, and running them again would double how long a consumer
+#             waits the first time they ask for a new version.
+jdk:
+  - openjdk21
+
+install:
+  - mvn --batch-mode --no-transfer-progress install -DskipTests -Prelease

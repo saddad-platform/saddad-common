@@ -1,22 +1,32 @@
 # saddad-common
 
 Shared technical library for the SADAD platform: the API response envelope, the error catalogue
-and exception model, JWT and password security, JPA base entities, the one-time-code service,
-the outbound integration caller and the web filters every service mounts.
+and exception model, JWT and password security, JPA base entities, the one-time-code service, the
+outbound integration caller and the web filters every service mounts.
 
-It is deliberately technical. Domain and business logic belong to the services that own them,
-and nothing here knows what a violation, a wallet or an onboarding application is.
+It is deliberately technical. Domain and business logic belong to the services that own them, and
+nothing here knows what a violation, a wallet or an onboarding application is.
 
 ## Installation
 
-The library is published to Maven Central. No authentication, no token, no extra repository and
-no `settings.xml` is needed to use it.
+Published through [JitPack](https://jitpack.io/#saddad-platform/saddad-common). No account, no
+token and no credential of any kind - JitPack builds this repository's tags on demand and serves
+them to anyone.
+
+Two things to add, the repository and the dependency.
 
 ### Maven
 
 ```xml
+<repositories>
+    <repository>
+        <id>jitpack.io</id>
+        <url>https://jitpack.io</url>
+    </repository>
+</repositories>
+
 <dependency>
-    <groupId>io.github.saddad-platform</groupId>
+    <groupId>com.github.saddad-platform</groupId>
     <artifactId>saddad-common</artifactId>
     <version>VERSION</version>
 </dependency>
@@ -27,15 +37,18 @@ no `settings.xml` is needed to use it.
 ```kotlin
 repositories {
     mavenCentral()
+    maven { url = uri("https://jitpack.io") }
 }
 
 dependencies {
-    implementation("io.github.saddad-platform:saddad-common:VERSION")
+    implementation("com.github.saddad-platform:saddad-common:VERSION")
 }
 ```
 
-Replace `VERSION` with the version you want; the published versions are listed on the
-[releases page](https://github.com/saddad-platform/saddad-common/releases).
+`VERSION` is a git tag from the
+[releases page](https://github.com/saddad-platform/saddad-common/releases) - `1.0.0`, and so on.
+The tag is the version: there is no separate publishing step, so what you ask for is exactly what
+was tagged.
 
 ## Requirements
 
@@ -45,11 +58,11 @@ Replace `VERSION` with the version you want; the published versions are listed o
 | Spring Boot | 3.3.x |
 
 The library is built against Spring Boot 3.3.3 and expects to run inside a Spring Boot
-application. It brings `spring-boot-starter-web`, `-validation`, `-security` and `-data-jpa`
-with it, so a service that depends on this does not declare those separately.
+application. It brings `spring-boot-starter-web`, `-validation`, `-security` and `-data-jpa` with
+it, so a service that depends on this does not declare those separately.
 
-Components live under `com.sadad.common`. A Spring Boot application that wants them scanned
-needs its own scan to include that package, which every service on the platform does with:
+Components live under `com.sadad.common`. A Spring Boot application that wants them scanned needs
+its own scan to include that package, which every service on the platform does with:
 
 ```java
 @SpringBootApplication
@@ -64,8 +77,8 @@ mvn verify
 
 Java 21 and Maven 3.9 or newer. No credentials are required to build or test.
 
-To try a change against a service before it is released, install it into your local repository
-and the service will resolve it from there rather than from Maven Central:
+To try a change against a service before it is released, install it locally and the service picks
+it up from there instead of JitPack:
 
 ```bash
 mvn install
@@ -73,16 +86,18 @@ mvn install
 
 ## Releasing
 
-Releases are cut from a GitHub Release and published automatically. See
-[RELEASING.md](RELEASING.md) for the process and for the one-time account setup it depends on.
+Set the version in `pom.xml`, push, and publish a GitHub Release whose tag is exactly that
+version. JitPack does the rest, and every service that uses the library gets a pull request
+offering the upgrade. [RELEASING.md](RELEASING.md) has the detail.
 
-Publishing a release also opens a dependency-update pull request on every service in the
-organisation that uses the library. Those pull requests are never merged automatically: each
-service's owner reviews it, that service's own CI runs against it, and the service is released
-on its own schedule. A library release never changes a service's version.
+Before you push, check everything locally - this costs nothing and nothing runs automatically on
+GitHub:
+
+```bash
+./verify.sh
+```
 
 ## Licence
 
-**Not yet chosen.** This repository has no LICENSE file, and Maven Central requires one before
-anything can be published. Choosing it is the owner's decision; see the note at the top of
-`pom.xml` and the prerequisites in [RELEASING.md](RELEASING.md).
+Not yet chosen. JitPack does not require one, but without it nobody reading this repository knows
+what they are permitted to do with the code. See [RELEASING.md](RELEASING.md), "A licence".

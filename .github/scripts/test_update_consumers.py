@@ -27,7 +27,7 @@ INLINE = """<project>
     <version>3.8.2</version>
     <dependencies>
         <dependency>
-            <groupId>io.github.saddad-platform</groupId>
+            <groupId>com.github.saddad-platform</groupId>
             <artifactId>saddad-common</artifactId>
             <version>1.0.0</version>
         </dependency>
@@ -47,7 +47,7 @@ PROPERTY = """<project>
     </properties>
     <dependencies>
         <dependency>
-            <groupId>io.github.saddad-platform</groupId>
+            <groupId>com.github.saddad-platform</groupId>
             <artifactId>saddad-common</artifactId>
             <version>${saddad-common.version}</version>
         </dependency>
@@ -58,7 +58,7 @@ PROPERTY = """<project>
 MANAGED = """<project>
     <dependencies>
         <dependency>
-            <groupId>io.github.saddad-platform</groupId>
+            <groupId>com.github.saddad-platform</groupId>
             <artifactId>saddad-common</artifactId>
         </dependency>
     </dependencies>
@@ -132,7 +132,7 @@ class NothingToDo(unittest.TestCase):
 class GroupIdAndSeverity(unittest.TestCase):
 
     def test_it_reads_the_declared_group(self):
-        self.assertEqual("io.github.saddad-platform", declared_group_id(INLINE))
+        self.assertEqual("com.github.saddad-platform", declared_group_id(INLINE))
 
     def test_a_major_upgrade_is_recognised(self):
         self.assertTrue(is_major_upgrade("1.4.2", "2.0.0"))
