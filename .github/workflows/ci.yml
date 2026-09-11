@@ -1,18 +1,22 @@
-# Builds saddad-common. Started by hand only.
+# Builds saddad-common on every change.
 #
-# Two deliberate absences:
+# It does not run test cases. That is this platform's rule for GitHub Actions: tests run on a
+# developer's machine through ./verify.sh, before pushing.
 #
-#   1. No automatic trigger. Nothing here runs on a push or a pull request.
-#   2. No tests. Test cases are not run on GitHub Actions on this platform - they run on your
-#      machine, through ./verify.sh, which is faster to read and costs nothing.
+# What it does do is worth having on every push - it proves the project still compiles and still
+# produces the three jars JitPack will serve, from a clean checkout on a machine that is not
+# yours. That catches exactly the things a local build hides: a file that was never committed, a
+# dependency that only exists in your own ~/.m2, a difference in JDK.
 #
-# What is left is worth a button: it proves the project still compiles and still produces the
-# three jars JitPack will serve, from a clean checkout on a machine that is not yours. That
-# catches the things a local build hides - a file never committed, a dependency only in your
-# own ~/.m2, a JDK difference.
+# This repository is public, and GitHub Actions is free and unlimited on public repositories, so
+# none of this is billed. The minutes that are billed belong to the private service repositories.
 name: Build
 
 on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
   workflow_dispatch:
 
 permissions:
