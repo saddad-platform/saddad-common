@@ -29,7 +29,7 @@
         a `v1.0.1` tag would make every service's POM read `<version>v1.0.1</version>`. The
         release workflow checks the two agree and refuses to go on if they do not.
     -->
-    <version>1.0.1</version>
+    <version>1.0.2</version>
     <packaging>jar</packaging>
 
     <name>SADAD Platform :: Common</name>
