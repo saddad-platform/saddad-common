@@ -100,7 +100,31 @@
              tools as a build on yours and a Javadoc failure is reproducible locally. -->
         <maven-source-plugin.version>3.3.1</maven-source-plugin.version>
         <maven-javadoc-plugin.version>3.11.2</maven-javadoc-plugin.version>
-    </properties>
+    
+        <!--
+            Newer than the version Spring Boot 3.3.3 manages (1.18.34).
+
+            Lombok reaches into javac's internals, so a JDK patch release can break it outright:
+            on JDK 21.0.12 the older version dies with
+            "ExceptionInInitializerError: com.sun.tools.javac.code.TypeTag :: UNKNOWN" and every
+            @Getter, @Builder and @Slf4j in the build silently stops generating. The symptom is
+            hundreds of "cannot find symbol" errors against source that is perfectly correct,
+            which sends you looking in exactly the wrong place. Pinning a version that knows
+            about current JDKs is the fix; keep it ahead of whatever JDK the team runs.
+        -->
+        <lombok.version>1.18.42</lombok.version>
+
+        <!--
+            Newer than the version Spring Boot 3.3.3 manages (1.14.19).
+
+            Byte Buddy generates the mock classes Mockito uses, so it has to understand the
+            class file version the JDK emits. On JDK 21.0.12 the older version cannot, and every
+            test that mocks anything fails with "Mockito cannot mock this class" - naming a class
+            that is perfectly ordinary, which sends you looking at the class instead of at the
+            toolchain. Same family of problem as the Lombok pin, same fix.
+        -->
+        <byte-buddy.version>1.17.8</byte-buddy.version>
+</properties>
 
     <dependencies>
         <dependency>
@@ -191,6 +215,34 @@
         There is nothing else here any more. Publishing to Maven Central needed signing keys, a
         verified namespace, an account token and a staging plugin; JitPack needs a git tag.
     -->
+    <!--
+        The module had no top-level <build> at all - the only one here lives inside the release
+        profile, so anything added there never applies to an ordinary `mvn compile`.
+    -->
+    <build>
+        <plugins>
+            <!--
+                Lombok is named as an annotation processor explicitly rather than being left to
+                be discovered on the classpath. Implicit discovery hides a processor failure as
+                hundreds of "cannot find symbol" errors against correct source; naming the path
+                makes it a declared, versioned build input that fails loudly instead.
+            -->
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-compiler-plugin</artifactId>
+                <configuration>
+                    <annotationProcessorPaths>
+                        <path>
+                            <groupId>org.projectlombok</groupId>
+                            <artifactId>lombok</artifactId>
+                            <version>${lombok.version}</version>
+                        </path>
+                    </annotationProcessorPaths>
+                </configuration>
+            </plugin>
+        </plugins>
+    </build>
+
     <profiles>
         <profile>
             <id>release</id>
